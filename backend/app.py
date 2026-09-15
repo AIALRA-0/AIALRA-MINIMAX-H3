@@ -1,0 +1,134 @@
+"""
+AI Movie Studio 2 - FastAPI Application
+
+Main web server for the AI Movie Studio 2 backend.
+Provides REST API endpoints for asset management, generation, rendering, and export.
+
+Usage:
+    uvicorn app:app --reload --port 8001
+
+    Or via main.py:
+    python main.py serve
+"""
+
+from contextlib import asynccontextmanager
+from datetime import datetime
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from core.runtime import LOCKED_MODE, LOCAL_ONLY, VAULT_DIR, cors_origins
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("[*] AI Movie Studio 2 - Starting up...")
+    print(f"    Time: {datetime.utcnow().isoformat()}")
+    print(f"    Vault: {VAULT_DIR}")
+    yield
+    print("[*] AI Movie Studio 2 - Shutting down...")
+
+
+app = FastAPI(
+    title="AI Movie Studio 2",
+    description="Professional AI Filmmaking Workstation API",
+    version="2.0.0",
+    lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins(),
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+)
+
+
+LOCKED_MUTATION_PREFIXES = (
+    "/api/settings/api-keys",
+    "/api/settings/comfy-config",
+    "/api/settings/workflows",
+    "/api/generate/loras/upload",
+    "/api/generate/models/upload",
+)
+
+
+@app.middleware("http")
+async def protect_remote_admin_surfaces(request: Request, call_next):
+    """Disable model, workflow, and secret mutations in locked remote mode."""
+    if (
+        LOCKED_MODE
+        and request.method.upper() not in {"GET", "HEAD", "OPTIONS"}
+        and request.url.path.startswith(LOCKED_MUTATION_PREFIXES)
+    ):
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "This admin operation is disabled in AIALRA_LOCKED_MODE."},
+        )
+    return await call_next(request)
+
+# Serve static asset files (images, videos, audio)
+app.mount("/assets", StaticFiles(directory=str(VAULT_DIR)), name="assets")
+
+
+@app.get("/health", tags=["System"])
+async def health_check():
+    return {
+        "status": "healthy",
+        "service": "AI Movie Studio 2",
+        "version": "2.0.0",
+        "profile": "local-h3" if LOCAL_ONLY else "hybrid",
+        "locked_mode": LOCKED_MODE,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
+@app.get("/", tags=["System"])
+async def root():
+    return {
+        "message": "Welcome to AI Movie Studio 2 API",
+        "docs": "/docs",
+        "health": "/health",
+    }
+
+
+# API Routers
+from api.routes_assets import router as assets_router
+from api.routes_scenes import router as scenes_router
+from api.routes_shots import router as shots_router
+from api.routes_generate import router as generate_router
+from api.routes_render import router as render_router
+from api.routes_audio import router as audio_router
+from api.routes_timeline import router as timeline_router
+from api.routes_export import router as export_router
+from api.routes_projects import router as projects_router
+from api.routes_settings import router as settings_router, load_api_keys_into_env
+from api.routes_screenplay import router as screenplay_router
+from api.routes_previs import router as previs_router
+from api.routes_pipeline import router as pipeline_router
+
+# Load saved API keys into env before drivers are initialized
+load_api_keys_into_env()
+
+app.include_router(projects_router, prefix="/api/projects", tags=["Projects"])
+app.include_router(assets_router, prefix="/api/assets", tags=["Assets"])
+app.include_router(scenes_router, prefix="/api/scenes", tags=["Scenes"])
+app.include_router(shots_router, prefix="/api/shots", tags=["Shots"])
+app.include_router(generate_router, prefix="/api/generate", tags=["Generate"])
+app.include_router(render_router, prefix="/api/render", tags=["Render"])
+app.include_router(audio_router, prefix="/api/audio", tags=["Audio"])
+app.include_router(timeline_router, prefix="/api/timeline", tags=["Timeline"])
+app.include_router(export_router, prefix="/api/export", tags=["Export"])
+app.include_router(settings_router, prefix="/api/settings", tags=["Settings"])
+app.include_router(screenplay_router, prefix="/api/screenplay", tags=["Screenplay"])
+app.include_router(previs_router, prefix="/api/previs", tags=["Previs"])
+app.include_router(pipeline_router, prefix="/api/pipeline", tags=["Draft-to-Master Pipeline"])

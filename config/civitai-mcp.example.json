@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "civitai": {
+      "type": "http",
+      "url": "https://mcp.civitai.com/mcp"
+    }
+  }
+}
