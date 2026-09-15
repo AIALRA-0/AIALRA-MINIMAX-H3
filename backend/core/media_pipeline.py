@@ -203,10 +203,11 @@ def concat_videos(inputs: Iterable[Path], output_path: Path) -> VideoProbe:
     output_path = output_path.resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     concat_file = output_path.with_suffix(".concat.txt")
-    concat_file.write_text(
-        "".join(f"file '{str(path).replace("'", "'\\''")}'\n" for path in paths),
-        encoding="utf-8",
-    )
+    concat_lines = []
+    for path in paths:
+        escaped_path = str(path).replace("'", "'\\''")
+        concat_lines.append(f"file '{escaped_path}'\n")
+    concat_file.write_text("".join(concat_lines), encoding="utf-8")
     try:
         _run([
             _binary("ffmpeg"), "-y", "-f", "concat", "-safe", "0",
