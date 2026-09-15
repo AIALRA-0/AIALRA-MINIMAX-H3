@@ -54,16 +54,39 @@
   "200": {
     "class_type": "ModelAttentionBackend",
     "inputs": {
-      "model": ["127", 0],
+      "model": ["201", 0],
       "attention": "comfy kitchen attention"
+    }
+  },
+  "201": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "model": ["127", 0],
+      "lora_name": "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+      "strength_model": 1.0
+    }
+  },
+  "202": {
+    "class_type": "MiniMaxLowVRAMAttention",
+    "inputs": {
+      "model": ["200", 0],
+      "head_chunks": 4
+    }
+  },
+  "203": {
+    "class_type": "MiniMaxChunkFeedForward",
+    "inputs": {
+      "model": ["202", 0],
+      "chunks": 4,
+      "seq_threshold": 4096
     }
   },
   "124": {
     "class_type": "BasicScheduler",
     "inputs": {
-      "model": ["200", 0],
+      "model": ["203", 0],
       "scheduler": "simple",
-      "steps": 20,
+      "steps": 4,
       "denoise": 1
     }
   },
@@ -80,7 +103,7 @@
   "126": {
     "class_type": "BasicGuider",
     "inputs": {
-      "model": ["200", 0],
+      "model": ["203", 0],
       "conditioning": ["136", 0]
     }
   },

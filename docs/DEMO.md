@@ -93,12 +93,12 @@ D:\AIALRA-MINIMAX-H3\outputs\studio\aialra_h3_15s_demo\pipeline\196dcb74b8fb46ce
 - [`examples/prompts/h3_glasshouse_shot_02.txt`](../examples/prompts/h3_glasshouse_shot_02.txt)
 - [`examples/prompts/h3_glasshouse_shot_03.txt`](../examples/prompts/h3_glasshouse_shot_03.txt)
 
-真实结果为 864×480、24 FPS、372 帧和 15.5007 秒，总 H3 计算约 8 分钟
+真实结果的三段源素材为 864×480、24 FPS、每段 124 帧，总 H3 计算约 8 分钟
 
-视频部分使用码流复制，音频在镜头边界做响度统一与 80ms 淡化，最终视频流哈希与原始拼接结果一致
+当前交付版在两处边界同步执行 0.25 秒画面与原生音频交叠，并在完整节目合成后统一响度，成片为 360 帧和精确 15 秒
 
 运行区成片：
 
 ```text
-D:\AIALRA-MINIMAX-H3\outputs\studio\aialra_h3_glasshouse_15s\delivery\aialra_h3_glasshouse_15s.mp4
+D:\AIALRA-MINIMAX-H3\outputs\studio\aialra_h3_glasshouse_15s\delivery\aialra_h3_glasshouse_15s_continuity_v2.mp4
 ```

@@ -21,10 +21,12 @@
 
 ```shell
 # 后端单元与集成测试
-& 'D:\AIALRA-MINIMAX-H3\venvs\studio-backend\Scripts\python.exe' -m pytest -q .\backend
+Push-Location .\backend
+& 'D:\AIALRA-MINIMAX-H3\venvs\studio-backend\Scripts\python.exe' -m pytest -q
+Pop-Location
 ```
 
-结果为 `19 passed`
+结果为 `28 passed`
 
 ```shell
 # 前端生产构建、ESLint 与 TypeScript 检查
@@ -156,7 +158,42 @@ MiniMax H3 完整草稿实测包括：
 
 生产使用建议按镜头或短片段执行 SeedVR2，再通过本项目的标准化与拼接链路生成全片母版
 
-## 8 发布与远程链路
+## 8 跨镜头连续性优化
+
+三段式玻璃温室样片已经使用新的同步交叠链路重制：
+
+- 三段画面和原生音频在同一 `0.25` 秒窗口交叠
+- 音频只在整片合成后执行一次 EBU R128 响度处理，避免逐段增益抽动
+- 成片为 864×480、24 FPS、360 帧、精确 15 秒
+- 两处原始边界的归一化画面跳变量分别为 `0.013606` 与 `0.013634`
+- 新版平均音量约 `-17.2 dB`，最大音量约 `-1.4 dB`
+- 2070 Super 当时图形负载为 33%，保护策略自动回退 CPU 编码，没有抢占桌面 GPU
+
+Ref2VA 真实冒烟测试已经完成：
+
+- 下载并校验 20.97GB Ref2VA INT8 主模型与 1.96GB 官方 4 步 Turbo LoRA
+- 0.2MP、124 帧、约 5.17 秒，端到端耗时 `100.3` 秒
+- 峰值显存约 15.5GB，可在 RTX 4080 16GB 上运行
+- 同时输入一张身份图和上一镜视频，上一镜音频作为配套参考进入 Context-IR
+- Ref2VA 首帧与上一镜尾帧跳变量为 `0.196514`，因此它适合跨景别身份与场景锁定，不作为零痕迹同机位续帧的默认模式
+
+质量版 FL2VA 对照测试已经完成：
+
+- 0.2MP、20 步、124 帧、约 5.17 秒，端到端耗时 `90.3` 秒
+- 与上一镜尾帧的跳变量为 `0.018355`，亮度差为 `0.010489`
+- 时间轴真实导出得到 864×480、24 FPS、H.264 与 AAC 成片，时长约 10.1 秒
+
+零痕迹同机位续帧继续使用 FL2VA 首帧约束，Ref2VA 用于允许镜头语言变化的多镜头一致性，最终统一经过同步画面与音频交叠
+
+运行区结果：
+
+```text
+D:\AIALRA-MINIMAX-H3\outputs\studio\aialra_h3_glasshouse_15s\delivery\aialra_h3_glasshouse_15s_continuity_v2.mp4
+D:\AIALRA-MINIMAX-H3\outputs\studio\aialra_h3_glasshouse_15s\delivery\ref2va_continuity_smoke_5s.mp4
+D:\AIALRA-MINIMAX-H3\outputs\studio\aialra_h3_glasshouse_15s\delivery\fl2va_quality_continuity_joined_10s.mp4
+```
+
+## 9 发布与远程链路
 
 GitHub 发布已经完成：
 

@@ -27,10 +27,25 @@ $groups = @(
 if ($IncludeRef2VA) {
     $groups += $manifest.h3_ref2va_optional
 }
-$requiredBytes = ($groups.files.bytes | Measure-Object -Sum).Sum
+$requiredBytes = 0L
+foreach ($group in $groups) {
+    $groupRoot = if ($group.local_dir) {
+        Join-Path $modelRoot $group.local_dir
+    } else {
+        $modelRoot
+    }
+    foreach ($file in $group.files) {
+        $destination = Join-Path $groupRoot $file.path
+        if (-not ((Test-Path -LiteralPath $destination -PathType Leaf) -and
+            (Get-Item -LiteralPath $destination).Length -eq [int64]$file.bytes)) {
+            $requiredBytes += [int64]$file.bytes
+        }
+    }
+}
 $drive = Get-PSDrive -Name ([IO.Path]::GetPathRoot($RuntimeRoot).TrimEnd(':\'))
 if ($drive.Free -lt ($requiredBytes + 15GB)) {
-    throw "Insufficient free space on $($drive.Name): drive. Need model bytes plus a 15 GiB safety margin."
+    $requiredGiB = [math]::Round($requiredBytes / 1GB, 2)
+    throw "Insufficient free space on $($drive.Name): drive. Need $requiredGiB GiB of missing model files plus a 15 GiB safety margin."
 }
 
 New-Item -ItemType Directory -Force -Path $modelRoot, $hfHome | Out-Null

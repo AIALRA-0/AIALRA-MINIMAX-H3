@@ -31,9 +31,9 @@ from core.schemas.camera import (
 )
 from core.drivers import get_image_driver, get_video_driver
 from core.drivers.base import VideoGenerationRequest, VideoGenerationMode, AspectRatio, GenerationStatus
-from core.logic.prompt_builder import build_prompt, parse_dialogue_tags
+from core.logic.prompt_builder import build_prompt, build_h3_video_prompt, parse_dialogue_tags
 from core.job_store import PersistentJobMap
-from core.media_pipeline import MediaPipelineError, concat_videos, normalize_delivery
+from core.media_pipeline import MediaPipelineError, normalize_delivery, stitch_continuous_segments
 from core.runtime import resolve_asset_url
 
 router = APIRouter()
@@ -1092,6 +1092,7 @@ async def generate_shot_video(req: ShotVideoGenerateRequest):
     effective_first_frame = req.first_frame_path
     continuity_warning = None
     effective_seed = req.seed
+    continuity_source_shot = None
     if not effective_first_frame and not req.skip_continuity and shot.get("scene_id"):
         all_shots = _load_shots(req.project_id)
         scene_shots = [s for s in all_shots if s.get("scene_id") == shot.get("scene_id") and s["id"] != req.shot_id]
@@ -1101,12 +1102,14 @@ async def generate_shot_video(req: ShotVideoGenerateRequest):
         prev_with_frame = [s for s in prev_shots if s.get("last_frame_path")]
         if prev_with_frame:
             prev_with_frame.sort(key=lambda s: s.get("sequence_order", 0), reverse=True)
-            effective_first_frame = prev_with_frame[0]["last_frame_path"]
+            continuity_source_shot = prev_with_frame[0]
+            effective_first_frame = continuity_source_shot["last_frame_path"]
             print(f"[routes_shots] video: auto-using prev shot last frame as first_frame: {effective_first_frame}")
         elif prev_shots:
             # Previous shots exist but none have a completed video (no last_frame_path)
             prev_shots.sort(key=lambda s: s.get("sequence_order", 0), reverse=True)
             prev_shot = prev_shots[0]
+            continuity_source_shot = prev_shot
             if not prev_shot.get("video_clip_path"):
                 continuity_warning = f"Previous shot '{prev_shot.get('name', 'unnamed')}' has no completed video. Generate it first for visual continuity."
             else:
@@ -1155,6 +1158,19 @@ async def generate_shot_video(req: ShotVideoGenerateRequest):
     except ValueError:
         mode = VideoGenerationMode.T2V
 
+    effective_reference_video = req.reference_video_path
+    effective_reference_audio = req.reference_audio_path
+    if req.model_id == "minimax_h3" and mode == VideoGenerationMode.R2V:
+        # Ref2VA has no dedicated first-frame input. Treat the chained terminal
+        # frame as its strongest image reference and the preceding take as the
+        # motion/audio context, unless the user supplied explicit alternatives.
+        if effective_first_frame and effective_first_frame not in effective_ref_images:
+            effective_ref_images.insert(0, effective_first_frame)
+        if continuity_source_shot and not effective_reference_video:
+            effective_reference_video = continuity_source_shot.get("video_clip_path")
+        if continuity_source_shot and not effective_reference_audio:
+            effective_reference_audio = continuity_source_shot.get("audio_clip_path")
+
     # Also pass establishing frame as reference for I2V mode (not just R2V)
     # so the model has scene/character identity even in I2V generation.
     if (not req.skip_continuity and shot.get("scene_id")
@@ -1171,14 +1187,38 @@ async def generate_shot_video(req: ShotVideoGenerateRequest):
         effective_prompt = req.prompt_override.strip()
         print(f"[routes_shots] video: using prompt override, skipping auto-compile")
     elif req.model_id == "minimax_h3":
-        # For H3, parse dialogue tags
-        effective_prompt = parse_dialogue_tags(req.prompt, shot.get("assets", []))
+        # Keep H3's native schema intact. Plain text prefixes outside the named
+        # fields weaken Context-IR parsing and were a major source of drift.
+        context_parts = []
+        if scene_obj:
+            for value in (
+                scene_obj.get("description", ""),
+                scene_obj.get("time_of_day", ""),
+                scene_obj.get("mood", ""),
+                scene_obj.get("lighting", ""),
+            ):
+                if value and value not in context_parts:
+                    context_parts.append(str(value).replace("_", " "))
+        effective_prompt = build_h3_video_prompt(
+            user_prompt=parse_dialogue_tags(req.prompt, shot.get("assets", [])),
+            mode=mode.value,
+            duration_seconds=req.duration_seconds,
+            scene_context=", ".join(context_parts),
+            shot_assets=shot.get("assets", []),
+            reference_image_count=len(effective_ref_images),
+            has_reference_video=bool(effective_reference_video),
+            has_reference_audio=bool(effective_reference_audio),
+            has_first_frame=bool(effective_first_frame),
+            has_last_frame=bool(req.last_frame_path),
+            soundscape=req.soundscape,
+            music=req.music,
+        )
 
     # --- Prompt prefix continuity: prepend scene context + character names ---
     # This ensures all video shots in the same scene share visual identity
     # (location, time of day, mood, lighting, characters) even if the user's
     # prompt is brief. Skipped when prompt_override is used or for H3 structured prompts.
-    if not req.prompt_override and shot.get("scene_id") and scene_obj:
+    if not req.prompt_override and req.model_id != "minimax_h3" and shot.get("scene_id") and scene_obj:
         context_parts = []
         scene_desc = scene_obj.get("description", "")
         if scene_desc:
@@ -1242,8 +1282,8 @@ async def generate_shot_video(req: ShotVideoGenerateRequest):
         first_frame_path=effective_first_frame,
         last_frame_path=req.last_frame_path,
         reference_image_paths=effective_ref_images,
-        reference_video_path=req.reference_video_path,
-        reference_audio_path=req.reference_audio_path,
+        reference_video_path=effective_reference_video,
+        reference_audio_path=effective_reference_audio,
         camera_movement=req.camera_movement,
         extra_params=req.extra_params or {},
     )
@@ -1707,7 +1747,12 @@ def _concat_videos(segment_paths: List[str], output_path: Path) -> bool:
                 print(f"[long-take] concat: segment file not found: {sp}")
                 return False
             resolved_paths.append(Path(resolved))
-        concat_videos(resolved_paths, output_path)
+        stitch_continuous_segments(
+            resolved_paths,
+            output_path,
+            transition_seconds=0.25,
+            fps=24,
+        )
         return output_path.exists()
     except (MediaPipelineError, OSError) as e:
         print(f"[long-take] concat error: {e}")

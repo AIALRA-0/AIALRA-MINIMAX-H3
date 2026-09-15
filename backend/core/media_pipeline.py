@@ -12,7 +12,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
 
-from PIL import Image, ImageFilter, ImageStat
+from PIL import Image, ImageChops, ImageFilter, ImageStat
 
 
 class MediaPipelineError(RuntimeError):
@@ -451,6 +451,144 @@ def concat_videos(inputs: Iterable[Path], output_path: Path) -> VideoProbe:
     return probe_video(output_path)
 
 
+def _segment_boundary_distance(left: Path, right: Path, fps: int = 24) -> dict[str, float]:
+    """Measure the encoded picture jump between two adjacent segments."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="aialra_boundary_") as temp_root:
+        temp_dir = Path(temp_root)
+        left_frame = temp_dir / "left.png"
+        right_frame = temp_dir / "right.png"
+        _run([
+            _binary("ffmpeg"), "-y", "-sseof", f"-{max(2 / fps, 0.08):.6f}",
+            "-i", str(left), "-frames:v", "1", str(left_frame),
+        ], timeout=120)
+        _run([
+            _binary("ffmpeg"), "-y", "-i", str(right),
+            "-frames:v", "1", str(right_frame),
+        ], timeout=120)
+        with Image.open(left_frame) as left_image, Image.open(right_frame) as right_image:
+            left_rgb = left_image.convert("RGB").resize((384, 216))
+            right_rgb = right_image.convert("RGB").resize((384, 216))
+            difference = ImageChops.difference(left_rgb, right_rgb)
+            channel_means = ImageStat.Stat(difference).mean
+            mean_absolute_error = sum(channel_means) / (3 * 255)
+            left_luma = ImageStat.Stat(left_rgb.convert("L")).mean[0]
+            right_luma = ImageStat.Stat(right_rgb.convert("L")).mean[0]
+    return {
+        "mean_absolute_error": round(mean_absolute_error, 6),
+        "luma_delta": round(abs(left_luma - right_luma) / 255, 6),
+    }
+
+
+def analyze_segment_boundaries(inputs: Iterable[Path], fps: int = 24) -> list[dict]:
+    """Return deterministic boundary metrics for an ordered segment list."""
+    paths = [path.resolve() for path in inputs]
+    return [
+        {
+            "left": str(paths[index]),
+            "right": str(paths[index + 1]),
+            **_segment_boundary_distance(paths[index], paths[index + 1], fps=fps),
+        }
+        for index in range(len(paths) - 1)
+    ]
+
+
+def stitch_continuous_segments(
+    inputs: Iterable[Path],
+    output_path: Path,
+    transition_seconds: float = 0.25,
+    fps: int = 24,
+) -> tuple[VideoProbe, dict]:
+    """Join continuation segments with matched picture and native-audio overlaps.
+
+    H3 continuation clips begin from the preceding clip's terminal frame. A short
+    overlap removes the duplicated hold frame and lets room tone cross the same
+    boundary as the picture. Loudness is normalized once after the full audio
+    program is assembled, avoiding per-segment gain pumping.
+    """
+    paths = [path.resolve() for path in inputs]
+    if not paths:
+        raise MediaPipelineError("At least one video is required")
+    if len(paths) == 1:
+        probe = normalize_delivery(paths[0], output_path, probe_video(paths[0]).duration_seconds, fps)
+        return probe, {"transition_seconds": 0.0, "boundaries": []}
+
+    probes = [probe_video(path) for path in paths]
+    if not all(probe.has_audio for probe in probes):
+        raise MediaPipelineError("Every continuation segment must contain native audio")
+    if any(probe.duration_seconds <= transition_seconds * 2 for probe in probes):
+        raise MediaPipelineError("Transition is too long for one or more segments")
+
+    output_path = output_path.resolve()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    width = probes[0].width
+    height = probes[0].height
+    command = [_binary("ffmpeg"), "-y"]
+    for path in paths:
+        command.extend(["-i", str(path)])
+
+    filters: list[str] = []
+    for index in range(len(paths)):
+        filters.append(
+            f"[{index}:v:0]fps={fps},scale={width}:{height}:force_original_aspect_ratio=decrease,"
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,settb=AVTB,"
+            f"setpts=PTS-STARTPTS[v{index}]"
+        )
+        filters.append(
+            f"[{index}:a:0]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
+            f"aresample=48000,asetpts=PTS-STARTPTS[a{index}]"
+        )
+
+    current_video = "v0"
+    current_duration = probes[0].duration_seconds
+    for index in range(1, len(paths)):
+        output_label = f"vx{index}"
+        offset = max(0.0, current_duration - transition_seconds)
+        filters.append(
+            f"[{current_video}][v{index}]xfade=transition=fade:duration={transition_seconds:.6f}:"
+            f"offset={offset:.6f}[{output_label}]"
+        )
+        current_video = output_label
+        current_duration += probes[index].duration_seconds - transition_seconds
+
+    current_audio = "a0"
+    for index in range(1, len(paths)):
+        output_label = f"ax{index}"
+        filters.append(
+            f"[{current_audio}][a{index}]acrossfade=d={transition_seconds:.6f}:"
+            f"c1=qsin:c2=qsin[{output_label}]"
+        )
+        current_audio = output_label
+    filters.append(
+        f"[{current_audio}]loudnorm=I=-16:LRA=11:TP=-1.5,aresample=48000[aout]"
+    )
+
+    encoder_args, acceleration = _video_encoder_args(
+        quality=16,
+        pixel_rate=width * height * fps,
+    )
+    suffix = [
+        "-filter_complex", ";".join(filters),
+        "-map", f"[{current_video}]", "-map", "[aout]",
+        "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+        "-movflags", "+faststart", "-shortest", str(output_path),
+    ]
+    _run_guarded_encode(
+        [*command, *encoder_args, *suffix],
+        [*command, "-c:v", "libx264", "-preset", "slow", "-crf", "16", *suffix],
+        acceleration,
+        timeout=1800,
+    )
+    report = {
+        "transition_seconds": transition_seconds,
+        "expected_duration_seconds": round(current_duration, 6),
+        "boundaries": analyze_segment_boundaries(paths, fps=fps),
+        "encoder": acceleration,
+    }
+    return probe_video(output_path), report
+
+
 def smooth_concatenated_audio(
     inputs: Iterable[Path],
     video_master: Path,
@@ -473,10 +611,7 @@ def smooth_concatenated_audio(
     labels = []
     for index, probe in enumerate(probes, start=1):
         label = f"a{index}"
-        chain = [
-            f"[{index}:a:0]loudnorm=I=-24:LRA=7:TP=-2",
-            "aresample=48000",
-        ]
+        chain = [f"[{index}:a:0]aresample=48000"]
         if index > 1:
             chain.append(f"afade=t=in:st=0:d={fade_seconds:.3f}")
         if index < len(probes):
@@ -484,7 +619,11 @@ def smooth_concatenated_audio(
             chain.append(f"afade=t=out:st={fade_start:.6f}:d={fade_seconds:.3f}")
         filters.append(",".join(chain) + f",asetpts=PTS-STARTPTS[{label}]")
         labels.append(f"[{label}]")
-    filters.append("".join(labels) + f"concat=n={len(paths)}:v=0:a=1[aout]")
+    filters.append(
+        "".join(labels)
+        + f"concat=n={len(paths)}:v=0:a=1[aconcat];"
+        + "[aconcat]loudnorm=I=-16:LRA=11:TP=-1.5,aresample=48000[aout]"
+    )
     command.extend([
         "-filter_complex", ";".join(filters),
         "-map", "0:v:0", "-map", "[aout]",

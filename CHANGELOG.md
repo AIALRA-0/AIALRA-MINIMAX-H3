@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+#### Seamless Multi-Shot Continuity
+- **Synchronized picture and audio joins** — H3 continuation segments now use a shared 250ms `xfade` and equal-power `acrossfade` window instead of a hard picture cut plus separate audio fades
+- **Program-level loudness** — Native audio is mixed first and normalized once at delivery, preventing per-shot gain pumping and boundary dips
+- **H3-native prompt compiler** — Video prompts now preserve the official Base and Ref2VA field order, exact first/last-frame alignment instructions, a continuity ledger, continuous ambience, and camera direction inside the correct description field
+- **Ref2VA continuity path** — Same-scene shots can automatically reuse the preceding selected video as motion/audio context while the terminal frame and establishing image lock identity and environment
+- **16GB Ref2VA workflow** — Added the official four-step Turbo LoRA plus low-VRAM attention and feed-forward chunking for RTX 4080-class cards
+- **Timeline export parity** — MP4 export now honors dissolve/wipe/fade transitions, clip speed, native H3 audio, audio start offsets, clip/track volume, and audio fades
+- **Display GPU guard retained** — Media encoding uses the 2070 Super only below desktop graphics/codec thresholds and otherwise falls back to CPU
+
 ### Added
 
 #### Configurable ComfyUI Model Paths

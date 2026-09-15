@@ -83,10 +83,9 @@ async def run(args: argparse.Namespace, data_root: Path) -> Path:
     from core.drivers.base import AspectRatio, GenerationStatus, VideoGenerationMode, VideoGenerationRequest
     from core.drivers.comfy_video import ComfyVideoDriver
     from core.media_pipeline import (
-        concat_videos,
         extract_ranked_keyframes,
         probe_as_dict,
-        smooth_concatenated_audio,
+        stitch_continuous_segments,
     )
 
     source_anchor = args.anchor.resolve()
@@ -174,16 +173,19 @@ async def run(args: argparse.Namespace, data_root: Path) -> Path:
         shot_paths.append(shot_path)
         current_anchor = next_anchor
 
-    stream_master = delivery_dir / "aialra_h3_glasshouse_15s_streamcopy.mp4"
-    concat_videos(shot_paths, stream_master)
     master = delivery_dir / "aialra_h3_glasshouse_15s.mp4"
-    probe = smooth_concatenated_audio(shot_paths, stream_master, master)
+    probe, continuity_report = stitch_continuous_segments(
+        shot_paths,
+        master,
+        transition_seconds=0.25,
+        fps=24,
+    )
     keyframes = extract_ranked_keyframes(master, delivery_dir / "keyframes", count=8, sample_fps=2.0)
     manifest["master"] = {
         "file": str(master),
-        "stream_copy_source": str(stream_master),
-        "video_reencoded": False,
-        "audio_boundary_fade_seconds": 0.08,
+        "video_reencoded": True,
+        "transition_seconds": 0.25,
+        "continuity_report": continuity_report,
         "probe": probe.__dict__,
     }
     manifest["keyframes"] = keyframes

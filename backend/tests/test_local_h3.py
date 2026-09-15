@@ -42,6 +42,32 @@ def test_h3_quality_profile_removes_lightning_lora():
     assert workflow["200"]["inputs"]["model"] == ["6", 0]
 
 
+def test_h3_ref2va_uses_four_step_lora_and_low_vram_chain():
+    driver = ComfyVideoDriver(model_id="minimax_h3")
+    request = _request(turbo_mode=True, megapixels=0.2)
+    request.mode = VideoGenerationMode.R2V
+    request.reference_image_paths = ["C:/fixture/reference.png"]
+    workflow = driver._build_workflow(request)
+
+    assert workflow["124"]["inputs"]["steps"] == 4
+    assert workflow["200"]["inputs"]["model"] == ["201", 0]
+    assert workflow["202"]["inputs"]["model"] == ["200", 0]
+    assert workflow["203"]["inputs"]["model"] == ["202", 0]
+    assert workflow["124"]["inputs"]["model"] == ["203", 0]
+    assert workflow["126"]["inputs"]["model"] == ["203", 0]
+
+
+def test_h3_ref2va_quality_removes_turbo_lora():
+    driver = ComfyVideoDriver(model_id="minimax_h3")
+    request = _request(turbo_mode=False, megapixels=0.2)
+    request.mode = VideoGenerationMode.R2V
+    workflow = driver._build_workflow(request)
+
+    assert "201" not in workflow
+    assert workflow["124"]["inputs"]["steps"] == 20
+    assert workflow["200"]["inputs"]["model"] == ["127", 0]
+
+
 def test_job_mapping_survives_new_instance():
     namespace = "test-restart-roundtrip"
     first = PersistentJobMap(namespace)

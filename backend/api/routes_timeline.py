@@ -115,6 +115,32 @@ def _get_clip_duration(clip: dict) -> float:
     return 5.0
 
 
+def _source_has_audio(path: Path) -> bool:
+    """Return whether a media source contains an audio stream."""
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=index", "-of", "csv=p=0", str(path)],
+            capture_output=True, text=True, timeout=10,
+        )
+        return result.returncode == 0 and bool(result.stdout.strip())
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _atempo_filter(speed: float) -> str:
+    """Build an atempo chain that also supports the editor's 0.25x and 4x."""
+    factors = []
+    remaining = max(0.05, speed)
+    while remaining < 0.5:
+        factors.append(0.5)
+        remaining /= 0.5
+    while remaining > 2.0:
+        factors.append(2.0)
+        remaining /= 2.0
+    factors.append(remaining)
+    return ",".join(f"atempo={factor:.6f}" for factor in factors)
+
+
 def _build_ffmpeg_command(
     clips: List[dict],
     audio_clips: List[dict],
@@ -128,8 +154,8 @@ def _build_ffmpeg_command(
 
     # Collect all input files
     input_args = []
-    video_inputs = []  # list of input stream indices
-    audio_inputs = []  # list of input stream indices
+    video_inputs = []  # list of (input index, clip, effective duration)
+    audio_inputs = []  # list of (input index, clip, duration)
     input_index = 0
 
     for clip in clips:
@@ -147,7 +173,12 @@ def _build_ffmpeg_command(
             # For videos: seek to trim-in point and limit duration
             trim_in = clip.get("trimInSeconds", 0) or 0
             input_args.extend(["-ss", str(trim_in), "-t", str(duration), "-i", str(path)])
-        video_inputs.append(input_index)
+        speed = max(0.05, float(clip.get("speed", 1) or 1))
+        effective_duration = duration / speed
+        video_inputs.append((input_index, clip, effective_duration))
+        # Preserve H3's native soundtrack unless the editor explicitly muted it.
+        if not is_image and _source_has_audio(path) and not clip.get("muted", False):
+            audio_inputs.append((input_index, clip, duration, speed))
         input_index += 1
 
     for clip in audio_clips:
@@ -158,7 +189,7 @@ def _build_ffmpeg_command(
         trim_in = clip.get("trimInSeconds", 0) or 0
         duration = _get_clip_duration(clip)
         input_args.extend(["-ss", str(trim_in), "-t", str(duration), "-i", str(path)])
-        audio_inputs.append(input_index)
+        audio_inputs.append((input_index, clip, duration, 1.0))
         input_index += 1
 
     if not video_inputs and not audio_inputs:
@@ -169,28 +200,87 @@ def _build_ffmpeg_command(
     # Build filter complex
     filters = []
     video_streams = []
-    for i, idx in enumerate(video_inputs):
-        filters.append(f"[{idx}:v]scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps}[v{i}]")
-        video_streams.append(f"[v{i}]")
+    for i, (idx, clip, duration) in enumerate(video_inputs):
+        speed = max(0.05, float(clip.get("speed", 1) or 1))
+        chain = (
+            f"[{idx}:v]scale={width}:{height}:force_original_aspect_ratio=decrease,"
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps},"
+            f"settb=AVTB,setpts=(PTS-STARTPTS)/{speed:.6f}"
+        )
+        transition_in = clip.get("transitionIn") or {}
+        transition_out = clip.get("transitionOut") or {}
+        if transition_in.get("type") in ("fade_black", "fade_white"):
+            color = "white" if transition_in["type"] == "fade_white" else "black"
+            fade_duration = min(duration / 2, max(0.05, float(transition_in.get("durationSeconds", 0.5))))
+            chain += f",fade=t=in:st=0:d={fade_duration:.6f}:color={color}"
+        if transition_out.get("type") in ("fade_black", "fade_white"):
+            color = "white" if transition_out["type"] == "fade_white" else "black"
+            fade_duration = min(duration / 2, max(0.05, float(transition_out.get("durationSeconds", 0.5))))
+            chain += f",fade=t=out:st={max(0, duration - fade_duration):.6f}:d={fade_duration:.6f}:color={color}"
+        filters.append(f"{chain}[v{i}]")
+        video_streams.append(f"v{i}")
 
     if video_streams:
-        concat_inputs = "".join(video_streams)
-        n = len(video_streams)
-        filters.append(f"{concat_inputs}concat=n={n}:v=1:a=0[vout]")
+        current = video_streams[0]
+        current_duration = video_inputs[0][2]
+        xfade_names = {"dissolve": "fade", "wipe_left": "wipeleft", "wipe_right": "wiperight"}
+        for i in range(1, len(video_streams)):
+            previous_clip = video_inputs[i - 1][1]
+            clip = video_inputs[i][1]
+            out_transition = previous_clip.get("transitionOut") or {}
+            in_transition = clip.get("transitionIn") or {}
+            transition_type = in_transition.get("type") or out_transition.get("type")
+            matched = transition_type in xfade_names and (
+                not out_transition or not in_transition or out_transition.get("type") == in_transition.get("type")
+            )
+            output_label = f"vj{i}"
+            if matched:
+                transition_duration = min(
+                    current_duration / 2,
+                    video_inputs[i][2] / 2,
+                    max(0.05, float(in_transition.get("durationSeconds") or out_transition.get("durationSeconds") or 0.25)),
+                )
+                offset = max(0.0, current_duration - transition_duration)
+                filters.append(
+                    f"[{current}][{video_streams[i]}]xfade=transition={xfade_names[transition_type]}:"
+                    f"duration={transition_duration:.6f}:offset={offset:.6f}[{output_label}]"
+                )
+                current_duration += video_inputs[i][2] - transition_duration
+            else:
+                filters.append(f"[{current}][{video_streams[i]}]concat=n=2:v=1:a=0[{output_label}]")
+                current_duration += video_inputs[i][2]
+            current = output_label
+        filters.append(f"[{current}]null[vout]")
 
     # Audio mixing
     audio_streams = []
-    for i, idx in enumerate(audio_inputs):
-        filters.append(f"[{idx}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a{i}]")
+    for i, (idx, clip, duration, speed) in enumerate(audio_inputs):
+        effective_duration = duration / speed
+        volume = max(0.0, float(clip.get("volume", 1) or 0)) * max(0.0, float(clip.get("_track_volume", 1) or 0))
+        start_ms = max(0, round(float(clip.get("startTime", 0) or 0) * 1000))
+        fade_in = min(effective_duration / 2, max(0.0, float(clip.get("fadeInSeconds", 0) or 0)))
+        fade_out = min(effective_duration / 2, max(0.0, float(clip.get("fadeOutSeconds", 0) or 0)))
+        chain = (
+            f"[{idx}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
+            f"{_atempo_filter(speed)},volume={volume:.6f}"
+        )
+        if fade_in:
+            chain += f",afade=t=in:st=0:d={fade_in:.6f}"
+        if fade_out:
+            chain += f",afade=t=out:st={max(0, effective_duration - fade_out):.6f}:d={fade_out:.6f}"
+        chain += f",adelay={start_ms}|{start_ms},asetpts=PTS-STARTPTS[a{i}]"
+        filters.append(chain)
         audio_streams.append(f"[a{i}]")
 
     if audio_streams:
         if len(audio_streams) > 1:
             mix_inputs = "".join(audio_streams)
-            filters.append(f"{mix_inputs}amix=inputs={len(audio_streams)}:duration=longest[aout]")
+            filters.append(
+                f"{mix_inputs}amix=inputs={len(audio_streams)}:duration=longest:normalize=0:dropout_transition=0,"
+                "loudnorm=I=-16:LRA=11:TP=-1.5,alimiter=limit=0.944[aout]"
+            )
         else:
-            # Single audio stream — just relabel
-            filters.append(f"{audio_streams[0]}anull[aout]")
+            filters.append(f"{audio_streams[0]}loudnorm=I=-16:LRA=11:TP=-1.5,alimiter=limit=0.944[aout]")
 
     filter_complex = ";".join(filters)
 
@@ -225,14 +315,14 @@ async def _run_render_job(job_id: str, project_id: str, timeline: dict, preset: 
         video_clips = []
         for track in timeline.get("videoTracks", []):
             for clip in track.get("clips", []):
-                video_clips.append(clip)
+                video_clips.append({**clip, "_track_volume": track.get("volume", 1)})
         video_clips.sort(key=lambda c: c.get("startTime", 0))
 
         # Collect audio clips from all audio tracks
         audio_clips = []
         for track in timeline.get("audioTracks", []):
             for clip in track.get("clips", []):
-                audio_clips.append(clip)
+                audio_clips.append({**clip, "_track_volume": track.get("volume", 1)})
 
         fmt = timeline.get("format", {})
         width = fmt.get("width", 1920)

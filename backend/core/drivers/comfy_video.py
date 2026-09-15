@@ -256,7 +256,11 @@ class ComfyVideoDriver(VideoDriver):
             if speed and speed != "normal":
                 cam_desc += f" at {speed} speed"
             if cam_desc and cam_desc not in effective_prompt:
-                effective_prompt = f"{effective_prompt}, {cam_desc}"
+                if self._model_id == "minimax_h3":
+                    from core.logic.prompt_builder import inject_h3_camera_direction
+                    effective_prompt = inject_h3_camera_direction(effective_prompt, cam_desc)
+                else:
+                    effective_prompt = f"{effective_prompt}, {cam_desc}"
 
         print(f"[comfy_video] effective prompt (after camera aug): {effective_prompt}")
 
@@ -622,21 +626,23 @@ class ComfyVideoDriver(VideoDriver):
         # The bundled FL2VA workflow has two explicit profiles. Draft uses the
         # official Lightning LoRA at 8 steps. Quality removes that LoRA and runs
         # the base model at 20 steps. A manual steps value wins in either mode.
-        if self._model_id == "minimax_h3" and wf_name == "minimax_h3":
+        if self._model_id == "minimax_h3" and wf_name in ("minimax_h3", "minimax_h3_r2v"):
             turbo_mode = bool(request.extra_params.get("turbo_mode", True))
             scheduler = next(
                 (node for node in wf.values() if isinstance(node, dict) and node.get("class_type") == "BasicScheduler"),
                 None,
             )
             if scheduler and request.extra_params.get("steps") is None:
-                scheduler["inputs"]["steps"] = 8 if turbo_mode else 20
+                turbo_steps = 4 if wf_name == "minimax_h3_r2v" else 8
+                scheduler["inputs"]["steps"] = turbo_steps if turbo_mode else 20
             if not turbo_mode:
+                base_model_node = "127" if wf_name == "minimax_h3_r2v" else "6"
                 for node in wf.values():
                     if not isinstance(node, dict):
                         continue
                     inputs = node.get("inputs", {})
                     if inputs.get("model") == ["201", 0]:
-                        inputs["model"] = ["6", 0]
+                        inputs["model"] = [base_model_node, 0]
                 wf.pop("201", None)
 
         # Remove unused nodes (e.g. LoadImage nodes for references not provided)
@@ -681,7 +687,12 @@ class ComfyVideoDriver(VideoDriver):
 
     def _resolve_to_local_abs(self, path: str) -> Optional[str]:
         """Resolve a served asset path to an absolute filesystem path."""
-        if not path or not path.startswith("/assets/"):
+        if not path:
+            return None
+        direct = Path(path)
+        if direct.is_absolute() and direct.exists():
+            return str(direct.resolve())
+        if not path.startswith("/assets/"):
             return None
         try:
             local = resolve_asset_url(path)

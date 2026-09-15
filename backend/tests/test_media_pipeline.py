@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from core.media_pipeline import (
+    analyze_segment_boundaries,
     _video_encoder_args,
     concat_videos,
     extract_ranked_keyframes,
@@ -12,6 +13,7 @@ from core.media_pipeline import (
     normalize_delivery,
     probe_video,
     smooth_concatenated_audio,
+    stitch_continuous_segments,
 )
 
 
@@ -116,3 +118,39 @@ def test_smooth_audio_keeps_video_stream_and_duration(tmp_path: Path):
     assert result.video_codec == "h264"
     assert result.has_audio
     assert result.duration_seconds > 1.8
+
+
+def test_continuous_stitch_overlaps_picture_and_audio_once(tmp_path: Path, monkeypatch):
+    first = tmp_path / "first.mp4"
+    second = tmp_path / "second.mp4"
+    output = tmp_path / "continuous.mp4"
+    _synthetic_video(first, duration=1.0)
+    _synthetic_video(second, duration=1.0)
+    monkeypatch.setenv("AIALRA_MEDIA_ACCELERATION", "cpu")
+
+    result, report = stitch_continuous_segments(
+        [first, second],
+        output,
+        transition_seconds=0.25,
+        fps=24,
+    )
+
+    assert output.is_file()
+    assert result.has_audio
+    assert abs(result.duration_seconds - 1.75) < 0.12
+    assert report["transition_seconds"] == 0.25
+    assert len(report["boundaries"]) == 1
+    assert 0 <= report["boundaries"][0]["mean_absolute_error"] <= 1
+
+
+def test_boundary_analysis_reports_each_junction(tmp_path: Path):
+    first = tmp_path / "first.mp4"
+    second = tmp_path / "second.mp4"
+    third = tmp_path / "third.mp4"
+    for path in (first, second, third):
+        _synthetic_video(path, duration=0.8)
+
+    report = analyze_segment_boundaries([first, second, third])
+
+    assert len(report) == 2
+    assert all("luma_delta" in boundary for boundary in report)

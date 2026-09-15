@@ -20,6 +20,129 @@ import re
 from typing import Optional, List, Dict, Any, Tuple
 
 
+_H3_SECTION_RE = re.compile(
+    r"(?ms)^([a-z_]+):\s*\n?(.*?)(?=^[a-z_]+:\s*$|\Z)"
+)
+
+
+def _h3_sections(prompt: str) -> Dict[str, str]:
+    return {
+        match.group(1): match.group(2).strip()
+        for match in _H3_SECTION_RE.finditer(prompt or "")
+    }
+
+
+def inject_h3_camera_direction(prompt: str, camera_direction: str) -> str:
+    """Insert camera direction inside an H3 section instead of after the schema."""
+    if not camera_direction or camera_direction in prompt:
+        return prompt
+    field = "detailed_description" if "detailed_description:" in prompt else "integrated_multimodal_description"
+    marker = f"{field}:"
+    if marker not in prompt:
+        return f"{prompt}, {camera_direction}"
+    before, after = prompt.split(marker, 1)
+    next_section = re.search(r"(?m)^([a-z_]+):\s*$", after)
+    if next_section:
+        body = after[:next_section.start()].rstrip()
+        tail = after[next_section.start():]
+        return f"{before}{marker}{body} Camera direction: {camera_direction}.\n{tail}"
+    return f"{before}{marker}{after.rstrip()} Camera direction: {camera_direction}."
+
+
+def build_h3_video_prompt(
+    user_prompt: str,
+    mode: str,
+    duration_seconds: float,
+    scene_context: str = "",
+    shot_assets: Optional[List[Dict[str, Any]]] = None,
+    reference_image_count: int = 0,
+    has_reference_video: bool = False,
+    has_reference_audio: bool = False,
+    has_first_frame: bool = False,
+    has_last_frame: bool = False,
+    soundscape: Optional[str] = None,
+    music: Optional[str] = None,
+) -> str:
+    """Compile an H3-native prompt with explicit cross-shot continuity rules."""
+    shot_assets = shot_assets or []
+    parsed = _h3_sections(user_prompt)
+    raw_description = (
+        parsed.get("detailed_description")
+        or parsed.get("integrated_multimodal_description")
+        or parsed.get("summary")
+        or user_prompt.strip()
+    )
+    identity_parts = []
+    for asset in shot_assets:
+        role = asset.get("role", asset.get("asset_type", ""))
+        name = asset.get("asset_name", "").strip()
+        if name and role in {"character", "location", "prop", "vehicle", "style"}:
+            identity_parts.append(f"{name} ({role})")
+    ledger = ", ".join(identity_parts)
+    continuity = (
+        "Preserve character identity, face geometry, hairstyle, wardrobe, props, set layout, "
+        "light direction, color palette, screen direction and action momentum across the whole clip. "
+        "Begin with the exact pose and composition supplied by the preceding boundary reference. "
+        "Do not reset staging, lighting, ambience or performance at an internal shot boundary."
+    )
+    description_parts = [part for part in (scene_context.strip(), raw_description, continuity) if part]
+    if ledger:
+        description_parts.append(f"Continuity ledger: {ledger}.")
+    description = " ".join(description_parts)
+    resolved_soundscape = soundscape or parsed.get("overall_soundscape") or (
+        "One continuous 32 kHz stereo room tone with stable ambience, perspective and noise floor. "
+        "Carry dialogue, breaths, footsteps and reverberation naturally across edits; no silence gap, "
+        "impact sound, ambience restart or sudden gain change at a shot boundary."
+    )
+    resolved_music = music or parsed.get("non_diegetic_music") or (
+        "No non-diegetic music unless explicitly requested; if present, keep one uninterrupted phrase "
+        "with stable tempo, key and loudness across edits."
+    )
+
+    if mode.lower() == "r2v":
+        subjects = []
+        for index in range(reference_image_count):
+            subjects.append(f"<Subject {index + 1}> is the identity and appearance shown in <Picture {index + 1}>.")
+        if has_reference_video:
+            subjects.append("<Video 1> defines the preceding motion, camera momentum, scene geometry and audio ambience.")
+        if has_reference_audio:
+            subjects.append("<Audio 1> defines the continuous voice, ambience and acoustic perspective.")
+        subject_text = "\n".join(subjects) or "No external subject reference is supplied."
+        retention = []
+        if reference_image_count:
+            retention.append("Fully preserve every referenced subject's identity, wardrobe, material and spatial role.")
+        if has_reference_video:
+            retention.append("Continue <Video 1> without replaying its ending; retain motion vectors, screen direction and room tone.")
+        if has_reference_audio:
+            retention.append("Use <Audio 1> as a continuous acoustic reference without a boundary reset.")
+        return (
+            f"subject_definitions:\n{subject_text}\n\n"
+            f"summary:\nSeamless continuation: {raw_description}\n\n"
+            f"retention_analysis:\n{' '.join(retention) or 'Retain the supplied scene state.'}\n\n"
+            f"detailed_description:\n{description}\n\n"
+            f"overall_soundscape:\n{resolved_soundscape}\n\n"
+            f"non_diegetic_music:\n{resolved_music}"
+        )[:4000]
+
+    alignments = []
+    if has_first_frame:
+        alignments.append(
+            "For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced."
+        )
+    if has_last_frame:
+        picture_number = 2 if has_first_frame else 1
+        alignments.append(
+            f"For the target video, at {duration_seconds:.2f} seconds into the target video, "
+            f"<Picture {picture_number}> (from [Shot {picture_number}]) is fully referenced."
+        )
+    prefix = ("\n".join(alignments) + "\n\n") if alignments else ""
+    return (
+        f"{prefix}integrated_multimodal_description:\n{description}\n\n"
+        f"overall_soundscape:\n{resolved_soundscape}\n\n"
+        f"non_diegetic_music:\n{resolved_music}"
+    )[:4000]
+
+
 # Retention detail mapping — what "fully_preserved" means per asset type
 RETAINED_DETAIL = {
     "character": "identity, face and clothing",
