@@ -25,6 +25,7 @@
 - 使用 SeedVR2 3B INT8 对选定视频执行 2× 超分
 - 在时间线中管理镜头、候选版本、音频和拼接结果
 - 使用 H3 Continuum V3.8 分段审片、局部重生成和断点续跑
+- 对连续短片采用三个约 5 秒的质量镜头，以上一段尾帧作为下一段锚点，再无损拼接
 
 前端支持中文与英文切换，首次打开默认中文
 
@@ -43,7 +44,9 @@ pwsh -File .\scripts\Download-Models.ps1 -RuntimeRoot 'D:\AIALRA-MINIMAX-H3' -Ac
 pwsh -File .\scripts\Start-ComfyUI.ps1 -RuntimeRoot 'D:\AIALRA-MINIMAX-H3'
 
 # 启动后端与生产版前端
-pwsh -File .\scripts\Start-Studio.ps1 -RuntimeRoot 'D:\AIALRA-MINIMAX-H3'
+pwsh -File .\scripts\Start-Studio.ps1 `
+  -RuntimeRoot 'D:\AIALRA-MINIMAX-H3' `
+  -FfmpegPath 'K:\AIALRA-H3-Tools\ffmpeg-full\ffmpeg-9.0.1-full_build\bin\ffmpeg.exe'
 ```
 
 打开 `http://127.0.0.1:3000`，正常结果是项目页显示中文界面、状态为已连接、图片模型只有 FLUX.2 Klein、视频模型只有 MiniMax H3
@@ -62,11 +65,16 @@ pwsh -File .\scripts\Stop-Local.ps1
 
 - 第一步，在素材页使用 FLUX.2 Klein 制作角色图、场景图或首帧
 - 第二步，在视频页选择 MiniMax H3，草稿档使用约 0.2 MP、8 步和 15 秒
+- 质量优先短片改用约 0.4 MP、20 步的基础模型，每段约 5 秒并用尾帧续接
 - 第三步，生成完成后执行智能抽帧，系统默认从全片候选中选择 8 张分布均匀的高分帧
 - 第四步，确认人物、构图和动作后执行 SeedVR2 2× 母版
 - 第五步，把标准化后的 15 秒母版加入时间线，并按镜头顺序拼接或导出
 
 MiniMax H3 的真实生成会占用大量显存，启动前请让翻译、语言模型或其他 CUDA 任务自然结束，不要终止其他任务来抢占 GPU
+
+双显卡机器仍把全部模型推理固定在 RTX 4080 上，显示用 RTX 2070 Super 只允许承担固定功能 NVENC 编码，而且必须同时满足图形、编码、解码、显存和像素率门限
+
+任一门限连续两次越界时，只终止本项目拥有的编码进程并回退 CPU；输入兼容的镜头拼接优先使用码流复制，不占用任一 GPU，也不产生二次压缩损失
 
 ## 4 已固定的本地组件
 
@@ -77,6 +85,7 @@ MiniMax H3 的真实生成会占用大量显存，启动前请让翻译、语言
 - KJNodes、VideoHelperSuite 与 MiniMax H3 Prompt Writer
 - H3 Continuum `3.8.2`，固定到仓库提交 `c38c616`
 - Civitai 官方 MCP，只用于公开元数据和版本调查，不保存浏览器 Cookie 或账户凭据
+- Windows Triton 与 SageAttention 已安装，H3 主工作流仍保留实测稳定的 Comfy Kitchen 注意力后端，未把未经 A/B 验证的全局加速写成质量结论
 
 模型文件不会进入 Git，下载清单与预期字节数位于 [`config/model-manifest.json`](config/model-manifest.json)
 
@@ -84,7 +93,7 @@ MiniMax H3 的真实生成会占用大量显存，启动前请让翻译、语言
 
 截至 2026-09-15 已完成：
 
-- 后端测试 `15 passed`
+- 后端测试 `19 passed`
 - 前端生产构建、ESLint 与 TypeScript 检查通过
 - 三份 ComfyUI API 工作流通过真实 `object_info` 节点和选项校验
 - H3 Continuum 上游测试 `1260 passed`、`2 skipped`，其中一项先受 Windows GBK 影响，切换 UTF-8 后复跑通过
@@ -94,6 +103,8 @@ MiniMax H3 的真实生成会占用大量显存，启动前请让翻译、语言
 - FLUX.2 Klein 真实 512×512 首帧约 17 秒完成
 - MiniMax H3 真实 15 秒草稿为 608×352、24 FPS、360 帧，约 5 分 55 秒完成
 - SeedVR2 真实全片 2× 母版为 1216×704、24 FPS、360 帧，约 2 小时 32 分完成
+- 新质量样片使用三段 0.4 MP、20 步基础模型镜头，得到 864×480、372 帧、15.5007 秒成片，总 H3 计算约 8 分钟
+- 三个镜头按尾帧连续锚定，视频采用码流复制，音频边界完成响度统一与 80ms 淡化
 - 全片母版保留 15.000 秒 H.264 视频与 AAC 立体声音频，三处抽样画面的人物、服装、列车和色调连续
 - 发布候选的工作区与完整提交历史通过 Gitleaks，均为 `no leaks found`
 - [公开 GitHub 仓库](https://github.com/AIALRA-0/AIALRA-MINIMAX-H3) 已建立
@@ -101,10 +112,12 @@ MiniMax H3 的真实生成会占用大量显存，启动前请让翻译、语言
   - 后端镜像构建通过
   - Compose 启动、健康检查与代理冒烟测试通过
 - VPS 回环反向隧道已建立并返回 HTTP 200，本机远程配置使用锁定模式
+- 公网 DNS、TLS 证书、身份网关匿名拦截与 AIALRA 主页入口卡片均已通过真实浏览器验证
+- 新样片已经出现在中文项目页，浏览器读取到 15.5326 秒并正常播放
 
 全片 2× 超分可以在 16GB 显存上运行，但生产环境更适合按短镜头或短片段超分后拼接，以缩短失败重试和审片周期
 
-公网域名与身份网关路由仍待确认最终主机名，未完成项目不会被描述为通过
+身份网关后的登录会话仍由部署者账户控制，公开验证没有保存或绕过登录凭据
 
 详细命令、产物和限制见 [验证记录](docs/VALIDATION.md)
 

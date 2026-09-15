@@ -1,0 +1,5 @@
+For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.
+
+integrated_multimodal_description: [Shot 1] Continue directly from <Picture 1> in the same conservatory, preserving the adult East Asian woman's identity, black bob haircut, deep emerald velvet coat, black turtleneck, silver dragonfly brooch, natural skin texture, lighting, and spatial continuity. She stops beside the cracked glass and watches a warm reflection glide across the silver dragonfly brooch, then raises her eyes toward the rain beyond the pane. The camera performs one very slow dolly-out, revealing more of the wet leaves, broken ironwork, and glowing practical lights while keeping her centered and composed. Photorealistic cinematic 35mm texture, stable anatomy, coherent fabric and reflections, controlled motion, deep teal shadows, warm amber highlights, a quiet final image.
+overall_soundscape: Rain remains consistent, a soft metal creak comes from the conservatory frame, leaves move in the draft, the distant thunder fades.
+non_diegetic_music: The low cello resolves into one sustained glass harmonica tone and fades gently at the end.

@@ -72,3 +72,33 @@ D:\AIALRA-MINIMAX-H3\outputs\studio\aialra_h3_15s_demo\pipeline\196dcb74b8fb46ce
 三处抽样画面显示人物身份、红色外套、场景照明和列车方向保持连续
 
 详细编码、时长、音频、哈希和资源占用见 [验证记录](VALIDATION.md)
+
+## 7 质量优先三段式演示
+
+长镜头更容易累积身份和动作漂移，因此新增一个可断点续跑的三段式生成器
+
+它使用本仓库的 H3 结构化提示词，每段约 5.17 秒，上一段尾帧自动成为下一段首帧
+
+```powershell
+& '<studio-python>' .\backend\tools\run_h3_demo.py '<anchor-image>' `
+  --runtime-root '<runtime-root>' `
+  --megapixels 0.4 `
+  --steps 20 `
+  --ffmpeg '<ffmpeg-full-path>'
+```
+
+三段提示词位于：
+
+- [`examples/prompts/h3_glasshouse_shot_01.txt`](../examples/prompts/h3_glasshouse_shot_01.txt)
+- [`examples/prompts/h3_glasshouse_shot_02.txt`](../examples/prompts/h3_glasshouse_shot_02.txt)
+- [`examples/prompts/h3_glasshouse_shot_03.txt`](../examples/prompts/h3_glasshouse_shot_03.txt)
+
+真实结果为 864×480、24 FPS、372 帧和 15.5007 秒，总 H3 计算约 8 分钟
+
+视频部分使用码流复制，音频在镜头边界做响度统一与 80ms 淡化，最终视频流哈希与原始拼接结果一致
+
+运行区成片：
+
+```text
+D:\AIALRA-MINIMAX-H3\outputs\studio\aialra_h3_glasshouse_15s\delivery\aialra_h3_glasshouse_15s.mp4
+```

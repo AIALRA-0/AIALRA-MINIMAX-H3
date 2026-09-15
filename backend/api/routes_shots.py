@@ -33,7 +33,7 @@ from core.drivers import get_image_driver, get_video_driver
 from core.drivers.base import VideoGenerationRequest, VideoGenerationMode, AspectRatio, GenerationStatus
 from core.logic.prompt_builder import build_prompt, parse_dialogue_tags
 from core.job_store import PersistentJobMap
-from core.media_pipeline import MediaPipelineError, normalize_delivery
+from core.media_pipeline import MediaPipelineError, concat_videos, normalize_delivery
 from core.runtime import resolve_asset_url
 
 router = APIRouter()
@@ -1699,55 +1699,18 @@ def _concat_videos(segment_paths: List[str], output_path: Path) -> bool:
     if len(segment_paths) < 1:
         return False
 
-    # Single segment: just copy/re-encode
-    if len(segment_paths) == 1:
-        resolved = _resolve_asset_path(segment_paths[0])
-        if not resolved:
-            print(f"[long-take] concat: segment file not found: {segment_paths[0]}")
-            return False
-        result = subprocess.run(
-            ["ffmpeg", "-y", "-i", resolved,
-             "-c:v", "libx264", "-preset", "medium", "-crf", "18",
-             "-c:a", "aac", "-b:a", "192k", "-pix_fmt", "yuv420p",
-             "-movflags", "+faststart", str(output_path)],
-            capture_output=True, text=True, timeout=300,
-        )
-        if result.returncode != 0:
-            print(f"[long-take] single-segment re-encode failed: {result.stderr[-500:]}")
-            return False
-        return output_path.exists()
-
-    temp_dir = output_path.parent / f"concat_temp_{output_path.stem}"
-    temp_dir.mkdir(exist_ok=True)
-
     try:
-        concat_list = temp_dir / "concat.txt"
-        lines = []
+        resolved_paths = []
         for sp in segment_paths:
             resolved = _resolve_asset_path(sp)
             if not resolved:
                 print(f"[long-take] concat: segment file not found: {sp}")
                 return False
-            lines.append(f"file '{resolved}'")
-        concat_list.write_text("\n".join(lines))
-
-        result = subprocess.run(
-            ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat_list),
-             "-c:v", "libx264", "-preset", "medium", "-crf", "18",
-             "-c:a", "aac", "-b:a", "192k", "-pix_fmt", "yuv420p",
-             "-movflags", "+faststart", str(output_path)],
-            capture_output=True, text=True, timeout=300,
-        )
-
-        if result.returncode != 0:
-            print(f"[long-take] concat failed: {result.stderr[-500:]}")
-            return False
-
-        shutil.rmtree(temp_dir, ignore_errors=True)
+            resolved_paths.append(Path(resolved))
+        concat_videos(resolved_paths, output_path)
         return output_path.exists()
-    except Exception as e:
+    except (MediaPipelineError, OSError) as e:
         print(f"[long-take] concat error: {e}")
-        shutil.rmtree(temp_dir, ignore_errors=True)
         return False
 
 

@@ -701,7 +701,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
           {/* ComfyUI Models */}
           <CollapsibleSection icon={Box} title="ComfyUI Models" badge={models.length > 0 ? `${models.length} models` : undefined}>
             <p className="text-[11px] text-studio-muted mb-3">
-              Upload checkpoint models (.safetensors, .ckpt, .pt) to ComfyUI's <code className="text-studio-accent">models/checkpoints/</code> directory.
+              Upload checkpoint models (.safetensors, .ckpt, .pt) to ComfyUI&apos;s <code className="text-studio-accent">models/checkpoints/</code> directory.
             </p>
 
             <div className="flex gap-2 mb-3">
@@ -765,7 +765,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
           {/* ComfyUI LoRAs */}
           <CollapsibleSection icon={Layers} title="ComfyUI LoRAs" badge={loras.length > 0 ? `${loras.length} LoRAs` : undefined}>
             <p className="text-[11px] text-studio-muted mb-3">
-              Upload LoRA files (.safetensors, .pt, .pth) to ComfyUI's <code className="text-studio-accent">models/loras/</code> directory. These appear in the LoRA selector in all generation tabs.
+              Upload LoRA files (.safetensors, .pt, .pth) to ComfyUI&apos;s <code className="text-studio-accent">models/loras/</code> directory. These appear in the LoRA selector in all generation tabs.
             </p>
 
             <div className="flex gap-2 mb-3">

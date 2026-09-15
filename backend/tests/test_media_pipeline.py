@@ -4,7 +4,15 @@ from pathlib import Path
 
 import pytest
 
-from core.media_pipeline import extract_ranked_keyframes, normalize_delivery, probe_video
+from core.media_pipeline import (
+    _video_encoder_args,
+    concat_videos,
+    extract_ranked_keyframes,
+    media_acceleration_status,
+    normalize_delivery,
+    probe_video,
+    smooth_concatenated_audio,
+)
 
 
 pytestmark = pytest.mark.skipif(
@@ -52,3 +60,59 @@ def test_probe_video_reports_geometry(tmp_path: Path):
     probe = probe_video(source)
     assert (probe.width, probe.height) == (320, 180)
     assert probe.video_codec == "h264"
+
+
+def test_concat_videos_preserves_compatible_streams(tmp_path: Path, monkeypatch):
+    first = tmp_path / "first.mp4"
+    second = tmp_path / "second.mp4"
+    output = tmp_path / "joined.mp4"
+    _synthetic_video(first, duration=1.0)
+    _synthetic_video(second, duration=1.0)
+    monkeypatch.setattr(
+        "core.media_pipeline._video_encoder_args",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("encoder should not run")),
+    )
+    result = concat_videos([first, second], output)
+    assert output.is_file()
+    assert result.video_codec == "h264"
+    assert result.has_audio
+    assert result.duration_seconds > 1.8
+
+
+def test_media_status_survives_invalid_numeric_configuration(monkeypatch):
+    monkeypatch.setenv("AIALRA_MEDIA_ACCELERATION", "cpu")
+    monkeypatch.setenv("AIALRA_MEDIA_GPU_INDEX", "not-a-number")
+    monkeypatch.setenv("AIALRA_MEDIA_GPU_MAX_GRAPHICS", "invalid")
+    status = media_acceleration_status()
+    assert status["selected_encoder"] == "libx264"
+    assert status["reason"] == "disabled_by_configuration"
+
+
+def test_display_gpu_is_not_used_above_safe_pixel_rate(monkeypatch):
+    monkeypatch.setenv("AIALRA_MEDIA_GPU_MAX_PIXEL_RATE", "100")
+    monkeypatch.setattr(
+        "core.media_pipeline.media_acceleration_status",
+        lambda: {
+            "selected_encoder": "h264_nvenc",
+            "reason": "ready",
+            "gpu_index": 1,
+            "limits": {},
+        },
+    )
+    encoder, status = _video_encoder_args(pixel_rate=101)
+    assert encoder[1] == "libx264"
+    assert status["reason"] == "pixel_rate_exceeds_display_safe_limit"
+
+
+def test_smooth_audio_keeps_video_stream_and_duration(tmp_path: Path):
+    first = tmp_path / "first.mp4"
+    second = tmp_path / "second.mp4"
+    stream_master = tmp_path / "stream.mp4"
+    output = tmp_path / "smooth.mp4"
+    _synthetic_video(first, duration=1.0)
+    _synthetic_video(second, duration=1.0)
+    concat_videos([first, second], stream_master)
+    result = smooth_concatenated_audio([first, second], stream_master, output)
+    assert result.video_codec == "h264"
+    assert result.has_audio
+    assert result.duration_seconds > 1.8

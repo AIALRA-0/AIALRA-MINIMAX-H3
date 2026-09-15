@@ -3,6 +3,7 @@ param(
     [string]$RuntimeRoot = 'D:\AIALRA-MINIMAX-H3',
     [int]$BackendPort = 8001,
     [int]$FrontendPort = 3000,
+    [string]$FfmpegPath = '',
     [switch]$LockedMode
 )
 
@@ -24,6 +25,24 @@ $env:AIALRA_LOCKED_MODE = if ($LockedMode) { '1' } else { '0' }
 $env:AIALRA_DATA_ROOT = Join-Path $RuntimeRoot 'outputs\studio'
 $env:AIALRA_JOB_DB = Join-Path $RuntimeRoot 'outputs\studio\jobs.sqlite3'
 $env:COMFY_URL = 'http://127.0.0.1:8188'
+$env:COMFY_VIDEO_URL = 'http://127.0.0.1:8188'
+$env:COMFY_IMAGE_URL = 'http://127.0.0.1:8188'
+$env:AIALRA_VIDEO_GPU_INDEX = '0'
+$env:AIALRA_MEDIA_ACCELERATION = 'auto'
+$env:AIALRA_MEDIA_GPU_INDEX = '1'
+$env:AIALRA_MEDIA_GPU_MAX_GRAPHICS = '20'
+$env:AIALRA_MEDIA_GPU_MAX_ENCODER = '10'
+$env:AIALRA_MEDIA_GPU_MAX_DECODER = '10'
+$env:AIALRA_MEDIA_GPU_MIN_FREE_MIB = '1024'
+$env:AIALRA_MEDIA_GPU_MAX_PIXEL_RATE = '62208000'
+if ($FfmpegPath) {
+    $resolvedFfmpeg = (Resolve-Path -LiteralPath $FfmpegPath -ErrorAction Stop).Path
+    $env:AIALRA_FFMPEG = $resolvedFfmpeg
+    $ffprobe = Join-Path (Split-Path -Parent $resolvedFfmpeg) 'ffprobe.exe'
+    if (Test-Path -LiteralPath $ffprobe) {
+        $env:AIALRA_FFPROBE = $ffprobe
+    }
+}
 $env:COMFY_DIR = Join-Path $RuntimeRoot 'ComfyUI'
 $env:COMFY_MODELS_DIR = Join-Path $RuntimeRoot 'models'
 $env:COMFY_OUTPUT_DIR = Join-Path $RuntimeRoot 'outputs\comfyui'

@@ -90,7 +90,10 @@ class ComfyImageDriver(ImageDriver):
         self._model_name = info["name"]
         self._workflow_t2i = info["workflow_t2i"]
         self._workflow_i2i = info["workflow_i2i"]
-        self.comfy_url = comfy_url or os.getenv("COMFY_URL", "http://127.0.0.1:8188")
+        self.comfy_url = comfy_url or os.getenv(
+            "COMFY_IMAGE_URL",
+            os.getenv("COMFY_URL", "http://127.0.0.1:8188"),
+        )
         self._auth_token = os.getenv("COMFY_AUTH_TOKEN", "")
         self.output_dir = output_dir or os.getenv("COMFY_OUTPUT_DIR", "")
         self._jobs: Dict[str, dict] = {}

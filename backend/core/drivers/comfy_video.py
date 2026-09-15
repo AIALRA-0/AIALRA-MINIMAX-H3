@@ -111,7 +111,10 @@ class ComfyVideoDriver(VideoDriver):
         output_dir: Optional[str] = None,
         model_id: str = "ltx_video_2_3",
     ):
-        self.comfy_url = comfy_url or os.getenv("COMFY_URL", "http://127.0.0.1:8188")
+        self.comfy_url = comfy_url or os.getenv(
+            "COMFY_VIDEO_URL",
+            os.getenv("COMFY_URL", "http://127.0.0.1:8188"),
+        )
         self._auth_token = os.getenv("COMFY_AUTH_TOKEN", "")
         self.output_dir = output_dir or os.getenv("COMFY_OUTPUT_DIR", "")
         self._model_id = model_id

@@ -82,12 +82,15 @@ app.mount("/assets", StaticFiles(directory=str(VAULT_DIR)), name="assets")
 
 @app.get("/health", tags=["System"])
 async def health_check():
+    from core.media_pipeline import media_acceleration_status
+
     return {
         "status": "healthy",
         "service": "AI Movie Studio 2",
         "version": "2.0.0",
         "profile": "local-h3" if LOCAL_ONLY else "hybrid",
         "locked_mode": LOCKED_MODE,
+        "media_acceleration": media_acceleration_status(),
         "timestamp": datetime.utcnow().isoformat(),
     }
 

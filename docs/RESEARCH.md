@@ -18,6 +18,7 @@
 - SeedVR2 使用自动时间分块、平铺 VAE 和 2× 输出，避免把整段高分辨率视频同时放入显存
 - Continuum 把长镜头拆成可审片、可重生成和可恢复的块，不需要一次性重跑整段
 - Prompt Writer 可以使用本地 Ollama 或 DirectGGUF，不依赖付费提示词接口
+- 质量优先镜头使用基础模型 20 步，长片拆成约 5 秒 I2V 镜头并用尾帧锚定下一段
 
 ## 2 提供的低配工作流
 
@@ -92,9 +93,25 @@ Continuum 支持 1 至 16 个分块，项目文档建议每块 5 至 15 秒，�
 - 未给出清晰许可或源码仓库的 LoRA 不进入自动安装脚本
 - NSFW 风格 LoRA 不进入默认演示或仓库清单，可在确认许可、基础模型兼容和文件哈希后手动放入 `models\loras`
 - Ref2VA 权重体积较大，只有需要多图、多视频或音频锁定时才通过 `-IncludeRef2VA` 安装
-- 依赖 Triton 的 KJ PatchTritonVAE 不进入 Windows 默认链路
+- VDN-H3 的主要性能数据来自 RTX 5090 与数据中心路径，项目说明也没有把 16GB 消费卡路径描述为最快，因此只保留作研究候选
+- 社区两阶段 H3 latent upscaler 仓库没有明确许可，不安装也不复制其实现
+- H3 Audio T8 对 16GB 显存过于紧张，只作为单任务实验候选，不进入生产默认值
+- SageAttention 已装入本机环境，但 H3 工作流自己的注意力节点仍使用 Comfy Kitchen，未经同种子 A/B 不切换
 
-## 6 主要来源
+## 6 16GB 实测工作流对照
+
+社区公开的 RTX 5060 Ti 16GB 数据显示，约 0.4 MP 是效率较好的质量起点，提升到 0.6 MP 后耗时增长明显
+
+同一组数据中 4 步和 6 步预览约需两分钟，6 步通常比 4 步更值得保留；EasyCache 会损伤动作与音频连续性，因此没有进入质量路径
+
+本项目据此保留两个明确档位：
+
+- 草稿档为官方 8 步 LoRA 与约 0.2 MP，可直接生成 15 秒
+- 质量档为基础模型 20 步与约 0.4 MP，采用三个约 5 秒镜头并用尾帧续接
+
+MiniMax 官方开源权重的基础输出为 768p，稀疏注意力与 2K regenerate 模块尚未作为本地开源链路发布，因此仓库不会把 API 能力写成本地能力
+
+## 7 主要来源
 
 - [ComfyUI MiniMax H3 教程](https://docs.comfy.org/tutorials/video/minimax/minimax-h3)
 - [ComfyUI MiniMax H3 模型仓库](https://huggingface.co/Comfy-Org/MiniMax-H3)
@@ -106,5 +123,8 @@ Continuum 支持 1 至 16 个分块，项目文档建议每块 5 至 15 秒，�
 - [MiniMax H3 Prompt Writer](https://github.com/duckyshell/ComfyUI-MiniMaxH3-Prompt-Writer)
 - [H3 Continuum](https://github.com/ukr8b3g-cmyk/ComfyUI-H3-Continuum)
 - [Civitai MCP](https://mcp.civitai.com/llms.txt)
+- [ComfyUI H3 Day-0 支持说明](https://blog.comfy.org/p/minimax-h3-day-0-support-in-comfyui)
+- [RTX 16GB H3 工作流实测](https://github.com/kasei-san/minimax-h3-comfyui-workflows)
+- [NVIDIA FFmpeg 与 NVENC 指南](https://docs.nvidia.com/video-technologies/video-codec-sdk/13.1/ffmpeg-with-nvidia-gpu/index.html)
 
 候选列表表示已调查，不表示全部候选都已安装或通过本机 GPU 验证

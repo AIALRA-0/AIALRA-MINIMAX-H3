@@ -403,7 +403,7 @@ export function ShotDetail({ shot, projectId, allShots, onRefresh, onClose }: Pr
               </h3>
               <div className="flex items-center gap-2">
                 <img src={shot.last_frame_path} alt="Last frame" className="w-24 aspect-video object-cover rounded-lg border border-studio-border cursor-zoom-in" onClick={() => setLightboxUrl(shot.last_frame_path!)} />
-                <p className="text-[10px] text-studio-muted">Auto-passes to the next shot's video generation as the first frame anchor for visual continuity.</p>
+                <p className="text-[10px] text-studio-muted">Auto-passes to the next shot&apos;s video generation as the first frame anchor for visual continuity.</p>
               </div>
             </div>
           )}

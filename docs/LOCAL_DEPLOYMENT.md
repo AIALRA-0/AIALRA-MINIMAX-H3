@@ -10,6 +10,7 @@
 
 - Windows 11 与支持当前 PyTorch CUDA 轮子的 NVIDIA 驱动
 - RTX 4080 16GB
+- 可选 RTX 2070 Super 显示卡，PCIe 3.0 x1 不用于模型推理
 - 64GB 系统内存
 - PowerShell 7、Git、Python 3.12、Node.js 与 npm
 - D 盘至少预留约 80 GiB，真实生成还需要额外输出空间
@@ -61,8 +62,10 @@ pwsh -File .\scripts\Download-Models.ps1 -RuntimeRoot 'D:\AIALRA-MINIMAX-H3' -Ac
 # 启动 ComfyUI，默认端口为 8188
 pwsh -File .\scripts\Start-ComfyUI.ps1 -RuntimeRoot 'D:\AIALRA-MINIMAX-H3'
 
-# 启动 FastAPI 与 Next.js，默认端口为 8001 和 3000
-pwsh -File .\scripts\Start-Studio.ps1 -RuntimeRoot 'D:\AIALRA-MINIMAX-H3'
+# 启动 FastAPI 与 Next.js，指定带 NVENC 的 FFmpeg 完整版
+pwsh -File .\scripts\Start-Studio.ps1 `
+  -RuntimeRoot 'D:\AIALRA-MINIMAX-H3' `
+  -FfmpegPath 'K:\AIALRA-H3-Tools\ffmpeg-full\ffmpeg-9.0.1-full_build\bin\ffmpeg.exe'
 ```
 
 两个脚本都只监听 `127.0.0.1`
@@ -95,7 +98,20 @@ pwsh -File .\scripts\Stop-Local.ps1
 
 ComfyUI 自身使用串行队列，工作台的任务映射持久化到 SQLite，刷新页面不会丢失已提交任务
 
-Windows 下缺少 Triton 时，KJNodes 的 `PatchTritonVAE` 会显示可选节点警告，当前工作流不依赖它，不需要为此安装非官方 Triton 包
+全部图片、视频与超分模型固定到 GPU 0，也就是 RTX 4080
+
+GPU 1 只允许执行 NVENC 固定功能编码，并采用以下默认保护：
+
+- 启动前连续两次确认图形负载不超过 20%
+- 编码与解码负载分别不超过 10%
+- 可用显存不少于 1024 MiB
+- 输入像素率不超过 1920×1080×30 FPS
+- 运行中每 0.5 秒复检，连续两次越界就终止本项目编码并回退 `libx264`
+- 分辨率、帧率、编码和音轨兼容时直接码流拼接，不调用编码器
+
+这些门限优先保证桌面和 3D 交互，不承诺每次都会启用 2070
+
+Windows Triton 与 SageAttention 已安装并通过启动探测，H3 模板仍显式使用 Comfy Kitchen 注意力后端，因此在完成同种子 A/B 前不把 SageAttention 计入 H3 加速收益
 
 ## 7 故障定位
 

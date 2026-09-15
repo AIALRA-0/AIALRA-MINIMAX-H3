@@ -1,0 +1,5 @@
+For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.
+
+integrated_multimodal_description: [Shot 1] Inside the abandoned glass conservatory at blue hour, preserve the adult East Asian woman's face, black bob haircut, deep emerald velvet coat, black turtleneck, silver dragonfly brooch, natural skin texture, lighting, and production design from <Picture 1>. She stands nearly still and slowly lifts her gaze from the rain-dark floor toward a warm light beyond the camera. Her breathing is subtle, loose hair tips move slightly, and reflected rain travels across the cracked glass behind her. The camera performs one slow, controlled dolly-in from a waist-up portrait to a calm medium close-up. Photorealistic cinematic 35mm texture, restrained motion, stable anatomy, coherent fabric, teal shadows, warm amber highlights.
+overall_soundscape: Fine rain taps the glass roof, a quiet draft passes through leaves, the velvet coat rustles once, distant low thunder remains outside the conservatory.
+non_diegetic_music: A sparse low cello note and a faint glass harmonica tone, intimate and restrained.

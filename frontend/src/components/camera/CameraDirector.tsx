@@ -1858,7 +1858,7 @@ export function CameraDirector({ projectId }: { projectId: string }) {
                     className="accent-studio-accent w-4 h-4"
                   />
                   <span className="text-xs text-studio-muted">
-                    Auto-continue from previous shot's last frame{mode === "i2v" ? " (when no first frame picked)" : ""}
+                    Auto-continue from previous shot&apos;s last frame{mode === "i2v" ? " (when no first frame picked)" : ""}
                   </span>
                 </label>
               )}

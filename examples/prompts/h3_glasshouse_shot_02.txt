@@ -1,0 +1,5 @@
+For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.
+
+integrated_multimodal_description: [Shot 1] Continue directly from <Picture 1> inside the same abandoned glass conservatory, preserving the adult East Asian woman's identity, black bob haircut, deep emerald velvet coat, black turtleneck, silver dragonfly brooch, natural skin texture, color palette, and spatial continuity. She turns her head slightly toward the cracked glass wall and takes one measured step into the warm edge light. Her expression changes from guarded to quietly resolved. The camera makes one gentle truck-right move while maintaining a steady medium close-up, allowing foreground leaves to pass softly across the frame. Photorealistic cinematic 35mm texture, restrained human motion, stable anatomy, coherent reflections, teal shadows, warm amber highlights.
+overall_soundscape: Fine rain continues on the roof, one soft footstep lands on damp tile, nearby leaves brush together, distant thunder stays low and natural.
+non_diegetic_music: The same sparse low cello and glass harmonica motif continues without a new musical entrance.

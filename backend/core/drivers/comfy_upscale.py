@@ -20,7 +20,10 @@ class ComfyUpscaleDriver:
     OUTPUT_NODE_ID = "15"
 
     def __init__(self) -> None:
-        self.comfy_url = os.getenv("COMFY_URL", "http://127.0.0.1:8188")
+        self.comfy_url = os.getenv(
+            "COMFY_VIDEO_URL",
+            os.getenv("COMFY_URL", "http://127.0.0.1:8188"),
+        )
         self.comfy_dir = Path(os.getenv("COMFY_DIR", "ComfyUI")).resolve()
         self._jobs = PersistentJobMap("comfy_seedvr2_upscale")
 

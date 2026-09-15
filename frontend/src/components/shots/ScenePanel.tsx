@@ -333,7 +333,7 @@ export function ScenePanel({ projectId }: { projectId: string }) {
                   <div className="flex items-start gap-2">
                     <Trash2 className="w-4 h-4 text-studio-danger shrink-0 mt-0.5" />
                     <div>
-                      <p className="text-[11px] font-semibold text-studio-danger">Delete "{scene.name}"?</p>
+                      <p className="text-[11px] font-semibold text-studio-danger">Delete &quot;{scene.name}&quot;?</p>
                       <p className="text-[10px] text-studio-muted mt-0.5 leading-relaxed">
                         This will permanently delete the scene, all its shots, storyboard frames, and video files. This cannot be undone.
                       </p>
@@ -524,7 +524,7 @@ export function ScenePanel({ projectId }: { projectId: string }) {
                         </button>
                       </div>
                       <p className="text-[9px] text-studio-muted/60 mb-2 leading-relaxed">
-                        Reference from the imported script. Copy any shot's text into a new shot's description.
+                        Reference from the imported script. Copy any shot&apos;s text into a new shot&apos;s description.
                       </p>
                       <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
                         {scene.script_breakdown!.map((bd, bdIdx) => {
