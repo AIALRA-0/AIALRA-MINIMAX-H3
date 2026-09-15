@@ -93,10 +93,13 @@ Validated on 2026-09-15:
 - A real MiniMax H3 draft completed at 608×352, 24 FPS, and 360 frames in about 5 minutes 55 seconds
 - A full SeedVR2 2× master completed at 1216×704, 24 FPS, and 360 frames in about 2 hours 32 minutes
 - The final master retained exactly 15.000 seconds of H.264 video and AAC stereo audio; sampled frames preserved the character, wardrobe, train, lighting, and camera progression
+- Gitleaks reported `no leaks found` for both the publication worktree and its complete commit history
+- The [public GitHub repository](https://github.com/AIALRA-0/AIALRA-MINIMAX-H3) is live; the frontend image, backend image, and Compose proxy smoke test all passed
+- The VPS loopback reverse tunnel is live and returns HTTP 200 while the local studio runs in locked mode
 
 A full 15-second 2× pass is feasible in 16GB of VRAM, but production runs should upscale short shots or segments before assembly to reduce retry and review time
 
-The public VPS and Authentik path still requires the target host, SSH alias, and gateway route. It is not reported as passed
+The public hostname and identity-gateway route still require the final hostname. They are not reported as passed
 
 See [validation evidence](docs/VALIDATION.md) for commands, artifacts, and limitations
 
