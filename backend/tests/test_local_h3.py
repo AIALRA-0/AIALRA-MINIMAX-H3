@@ -42,6 +42,56 @@ def test_h3_quality_profile_removes_lightning_lora():
     assert workflow["200"]["inputs"]["model"] == ["6", 0]
 
 
+def test_h3_continuum_uses_native_latent_av_chain():
+    driver = ComfyVideoDriver(model_id="minimax_h3")
+    request = VideoGenerationRequest(
+        prompt="[0-5s]\nFirst action.\n\n[5-10s]\nContinue the same action.",
+        mode=VideoGenerationMode.T2V,
+        duration_seconds=10.0,
+        aspect_ratio=AspectRatio.LANDSCAPE_16_9,
+        seed=42,
+        extra_params={
+            "continuum": True,
+            "continuum_chunks": 2,
+            "continuum_video_seam": "Analyze Only",
+        },
+    )
+
+    workflow = driver._build_workflow(request)
+
+    sampler = workflow["8"]["inputs"]
+    assert workflow["8"]["class_type"] == "H3ContinuumSamplerV38"
+    assert sampler["chunks"] == 2
+    assert sampler["chunk_seconds"] == 5.0
+    assert sampler["continuity"] == "Balanced — 22 frames"
+    assert sampler["audio_continuity"] is True
+    assert "first_frame" not in sampler
+    assert workflow["11"]["class_type"] == "H3ContinuumAssembleSeamV35"
+    assert workflow["11"]["inputs"]["video_seam"] == "Analyze Only"
+    assert workflow["11"]["inputs"]["images"] == ["9", 0]
+    assert workflow["11"]["inputs"]["assembly_plan"] == ["8", 2]
+    assert "20" not in workflow
+
+
+def test_h3_continuum_timeline_keeps_chunk_boundaries_explicit():
+    from api.routes_shots import _h3_continuum_timeline
+
+    timeline = _h3_continuum_timeline({
+        "prompt": "Keep the same subject and location.",
+        "segment_duration": 5.0,
+        "segments": [
+            {"prompt": "The subject starts walking."},
+            {"prompt": "The subject raises the compass."},
+            {"prompt": "The subject looks toward the ferns."},
+        ],
+    })
+
+    assert "[0-5s]" in timeline
+    assert "[5-10s]" in timeline
+    assert "[10-15s]" in timeline
+    assert timeline.count("Do not reset the action or camera.") == 2
+
+
 def test_h3_ref2va_uses_four_step_lora_and_low_vram_chain():
     driver = ComfyVideoDriver(model_id="minimax_h3")
     request = _request(turbo_mode=True, megapixels=0.2)

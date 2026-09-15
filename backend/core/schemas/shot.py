@@ -180,15 +180,15 @@ class ShotVideoGenerateRequest(BaseModel):
 
 
 class LongTakeRequest(BaseModel):
-    """Request to generate a long take via keyframe interpolation.
+    """Request to generate a continuous long take.
 
-    Multiple keyframes are interpolated pairwise using FLF2V,
-    then stitched together with ffmpeg into a single continuous video.
+    MiniMax H3 uses one H3 Continuum latent AV sequence. Other FLF2V models
+    retain the legacy pairwise interpolation path.
 
     Each keyframe can be defined by an image, a prompt, or both:
-    - Image only: FLF2V interpolates between the images
-    - Prompt only: An image is generated via T2I from the prompt, then FLF2V
-    - Both: FLF2V uses the image, prompt enriches the segment description
+    - Image only: the first and final images anchor the sequence endpoints
+    - Prompt only: an image is generated via T2I for the endpoint
+    - Both: endpoint images anchor the sequence and prompts guide each chunk
 
     Per-keyframe prompts follow the MiniMax H3 Director Chain pattern:
     - `prompt` is the global prompt (scene context, overall action)

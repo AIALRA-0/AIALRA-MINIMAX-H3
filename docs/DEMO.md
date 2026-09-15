@@ -73,32 +73,27 @@ D:\AIALRA-MINIMAX-H3\outputs\studio\aialra_h3_15s_demo\pipeline\196dcb74b8fb46ce
 
 详细编码、时长、音频、哈希和资源占用见 [验证记录](VALIDATION.md)
 
-## 7 质量优先三段式演示
+## 7 H3 Continuum 连续长镜头候选
 
-长镜头更容易累积身份和动作漂移，因此新增一个可断点续跑的三段式生成器
+旧三段独立生成加 xfade 的演示没有通过人工观看验收，已经降级为失败回归材料
 
-它使用本仓库的 H3 结构化提示词，每段约 5.17 秒，上一段尾帧自动成为下一段首帧
+当前演示直接调用成熟的 H3 Continuum V3.8，在生成阶段传递视频与音频 latent 上下文，每个分块完成后可以落盘、复用和从指定分块重生成
 
 ```powershell
-& '<studio-python>' .\backend\tools\run_h3_demo.py '<anchor-image>' `
-  --runtime-root '<runtime-root>' `
-  --megapixels 0.4 `
-  --steps 20 `
-  --ffmpeg '<ffmpeg-full-path>'
+& '<studio-python>' .\backend\tools\run_h3_continuum_demo.py `
+  --duration 15 `
+  --chunks 3 `
+  --balanced `
+  --video-seam Auto `
+  --run-name 'aialra_h3_continuum_quality_candidate_v1'
 ```
 
-三段提示词位于：
+真实结果为 1024×576、24 FPS、360 帧、14.998 秒，H3 计算与装配约 690.5 秒
 
-- [`examples/prompts/h3_glasshouse_shot_01.txt`](../examples/prompts/h3_glasshouse_shot_01.txt)
-- [`examples/prompts/h3_glasshouse_shot_02.txt`](../examples/prompts/h3_glasshouse_shot_02.txt)
-- [`examples/prompts/h3_glasshouse_shot_03.txt`](../examples/prompts/h3_glasshouse_shot_03.txt)
-
-真实结果的三段源素材为 864×480、24 FPS、每段 124 帧，总 H3 计算约 8 分钟
-
-当前交付版在两处边界同步执行 0.25 秒画面与原生音频交叠，并在完整节目合成后统一响度，成片为 360 帧和精确 15 秒
+5 秒与 10 秒边界通过逐帧抽样，当前只认定为连贯性候选，不宣称达到高分辨率终片或行业最佳标准
 
 运行区成片：
 
 ```text
-D:\AIALRA-MINIMAX-H3\outputs\studio\aialra_h3_glasshouse_15s\delivery\aialra_h3_glasshouse_15s_continuity_v2.mp4
+D:\AIALRA-MINIMAX-H3\outputs\continuum\aialra_h3_continuum_quality_candidate_v1.mp4
 ```

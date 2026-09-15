@@ -10,8 +10,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-#### Seamless Multi-Shot Continuity
-- **Synchronized picture and audio joins** — H3 continuation segments now use a shared 250ms `xfade` and equal-power `acrossfade` window instead of a hard picture cut plus separate audio fades
+#### H3-native long-take correction
+- **False seamless claim withdrawn** — Independent decoded clips plus `xfade` are now documented as a failed continuity experiment, not a quality workflow
+- **Mature Continuum workflow adopted** — MiniMax H3 long takes use upstream H3 Continuum V3.8 with latent video/audio context, resumable chunks, and exact-duration assembly
+- **No decoded-clip xfade for H3 long takes** — The web long-take endpoint submits one Continuum sequence and stores its finalized output directly
+- **Human review is the quality gate** — Pixel and waveform diagnostics locate boundaries but no longer decide whether a sample is seamless or production quality
 - **Program-level loudness** — Native audio is mixed first and normalized once at delivery, preventing per-shot gain pumping and boundary dips
 - **H3-native prompt compiler** — Video prompts now preserve the official Base and Ref2VA field order, exact first/last-frame alignment instructions, a continuity ledger, continuous ambience, and camera direction inside the correct description field
 - **Ref2VA continuity path** — Same-scene shots can automatically reuse the preceding selected video as motion/audio context while the terminal frame and establishing image lock identity and environment

@@ -1763,13 +1763,94 @@ def _concat_videos(segment_paths: List[str], output_path: Path) -> bool:
 _long_take_jobs: Dict[str, dict] = {}
 
 
+def _h3_continuum_timeline(job: dict) -> str:
+    """Build the Timeline prompt consumed by the upstream Continuum sampler."""
+    lines = [job["prompt"].strip()]
+    segment_duration = float(job["segment_duration"])
+    for index, segment in enumerate(job["segments"]):
+        start = index * segment_duration
+        end = (index + 1) * segment_duration
+        lines.extend([
+            "",
+            f"[{start:g}-{end:g}s]",
+            segment.get("prompt", job["prompt"]).strip(),
+            (
+                "Continue from the exact final pose, object state, camera velocity, "
+                "lighting, environment, and sound bed of the preceding instant. "
+                "Do not reset the action or camera."
+                if index
+                else "Begin the continuous action without a cut or dissolve."
+            ),
+        ])
+    return "\n".join(lines).strip()
+
+
+async def _start_h3_continuum_long_take(long_take_job_id: str) -> None:
+    """Submit one native latent AV sequence instead of independent decoded clips."""
+    job = _long_take_jobs.get(long_take_job_id)
+    if not job:
+        return
+    driver = get_video_driver(job["model_id"])
+    if not driver:
+        job["status"] = "failed"
+        job["error"] = f"Driver {job['model_id']} not found"
+        return
+
+    segments = job["segments"]
+    if not segments:
+        job["status"] = "failed"
+        job["error"] = "No Continuum chunks were prepared"
+        return
+
+    extra_params = dict(job.get("extra_params") or {})
+    run_name = f"{job['project_id']}_{job['shot_id']}_{job['take_id']}"[:96]
+    extra_params.update({
+        "continuum": True,
+        "continuum_chunks": len(segments),
+        "continuum_chunk_seconds": job["segment_duration"],
+        "continuum_prompt_mode": "Timeline",
+        "continuum_context": "Balanced — 22 frames",
+        "continuum_audio": True,
+        "continuum_storage": "Save + Auto Resume",
+        "continuum_run_name": run_name,
+        "continuum_generation_mode": "Full Run",
+        "continuum_video_seam": "Auto",
+        "continuum_audio_seam": "Auto",
+        "continuum_balanced": not bool(extra_params.get("turbo_mode", False)),
+    })
+    request = VideoGenerationRequest(
+        prompt=_h3_continuum_timeline(job),
+        negative_prompt=job["negative_prompt"],
+        mode=VideoGenerationMode.I2V,
+        duration_seconds=job["total_duration"],
+        aspect_ratio=job["aspect_ratio"],
+        seed=job["base_seed"],
+        first_frame_path=segments[0].get("first_frame") or None,
+        last_frame_path=segments[-1].get("last_frame") or None,
+        camera_movement=job["camera_movement"],
+        extra_params=extra_params,
+    )
+    print(
+        f"[long-take] H3 Continuum: {len(segments)} chunks x "
+        f"{job['segment_duration']}s, no decoded-clip xfade"
+    )
+    response = await driver.generate(request)
+    if response.status == GenerationStatus.FAILED:
+        job["status"] = "failed"
+        job["error"] = f"H3 Continuum failed: {response.error_message}"
+        return
+    job["native_continuum"] = True
+    job["segment_job_ids"] = [response.job_id]
+    job["status"] = "generating"
+
+
 @router.post("/long-take")
 async def generate_long_take(req: LongTakeRequest):
     """Generate a long take via keyframe interpolation.
 
-    Splits the keyframes into pairs and generates a FLF2V segment for each pair.
-    Each segment uses keyframe[i] as first_frame and keyframe[i+1] as last_frame.
-    After all segments complete, they are stitched together with ffmpeg.
+    MiniMax H3 is submitted as one H3 Continuum latent AV sequence. The first
+    and last images anchor the endpoints; per-keyframe prompts guide chunks.
+    Non-H3 models retain the legacy pairwise FLF2V path.
 
     Returns a job_id that can be polled via /long-take/status/{job_id}.
     """
@@ -1827,6 +1908,17 @@ async def generate_long_take(req: LongTakeRequest):
         })
 
     total_duration = len(segments) * req.segment_duration
+    if req.model_id == "minimax_h3":
+        if len(segments) > 16:
+            raise HTTPException(
+                status_code=400,
+                detail="H3 Continuum supports at most 16 chunks per sequence",
+            )
+        if req.segment_duration < 4.0:
+            raise HTTPException(
+                status_code=400,
+                detail="H3 Continuum chunks must be at least 4 seconds",
+            )
     print(f"[long-take] starting: {len(segments)} segments × {req.segment_duration}s = {total_duration}s total")
     if t2i_needed:
         print(f"[long-take] {len(t2i_needed)} keyframes need T2I generation: {t2i_needed}")
@@ -1876,7 +1968,10 @@ async def generate_long_take(req: LongTakeRequest):
         for i, seg in enumerate(segments):
             seg["first_frame"] = kf_paths[i]
             seg["last_frame"] = kf_paths[i + 1]
-        await _start_next_segment(job_id)
+        if req.model_id == "minimax_h3":
+            await _start_h3_continuum_long_take(job_id)
+        else:
+            await _start_next_segment(job_id)
 
     return {
         "job_id": job_id,
@@ -2037,7 +2132,10 @@ async def check_long_take_status(job_id: str):
                 seg["first_frame"] = resolved.get(str(i), "")
                 seg["last_frame"] = resolved.get(str(i + 1), "")
             job["status"] = "generating"
-            await _start_next_segment(job_id)
+            if job["model_id"] == "minimax_h3":
+                await _start_h3_continuum_long_take(job_id)
+            else:
+                await _start_next_segment(job_id)
             return {"status": "generating", "progress": {"current": 0, "total": len(job["segments"])}}
 
         # Generate T2I for the current keyframe
@@ -2099,7 +2197,73 @@ async def check_long_take_status(job_id: str):
             "t2i_progress": {"current": t2i_progress, "total": len(t2i_needed)},
         }
 
-    # Check current segment
+    # H3 Continuum returns one already-finalized AV sequence. Do not pass it
+    # through the legacy decoded-clip xfade path.
+    if job.get("native_continuum"):
+        driver = get_video_driver(job["model_id"])
+        if not driver or not job.get("segment_job_ids"):
+            job["status"] = "failed"
+            job["error"] = "H3 Continuum driver state is missing"
+            return {"status": "failed", "error": job["error"]}
+        response = await driver.check_status(job["segment_job_ids"][0])
+        if response.status == GenerationStatus.FAILED:
+            job["status"] = "failed"
+            job["error"] = response.error_message or "H3 Continuum generation failed"
+            return {"status": "failed", "error": job["error"]}
+        if response.status != GenerationStatus.COMPLETED or not response.video_url:
+            return {
+                "status": "generating",
+                "progress": {"current": 0, "total": len(job["segments"])},
+            }
+
+        final_url = await _download_video_to_vault(
+            job["project_id"],
+            job["shot_id"],
+            response.video_url,
+            f"{job['take_id']}_continuum",
+        )
+        job["final_video_url"] = final_url
+        job["status"] = "completed"
+        shots = _load_shots(job["project_id"])
+        shot = next((item for item in shots if item["id"] == job["shot_id"]), None)
+        if shot:
+            takes = shot.get("video_takes", [])
+            takes.append({
+                "id": job["take_id"],
+                "path": final_url,
+                "seed": job["base_seed"],
+                "prompt": job["prompt"],
+                "negative_prompt": job["negative_prompt"],
+                "model_id": job["model_id"],
+                "camera_movement": job["camera_movement"],
+                "mode": "h3_continuum",
+                "segment_count": len(job["segments"]),
+                "total_duration": job["total_duration"],
+                "segment_prompts": [item["prompt"] for item in job["segments"]],
+                "keyframe_paths": [job["segments"][0]["first_frame"], job["segments"][-1]["last_frame"]],
+                "created_at": datetime.utcnow().isoformat(),
+                "selected": len(takes) == 0,
+            })
+            shot["video_takes"] = takes
+            if len(takes) == 1:
+                shot["video_clip_path"] = final_url
+                shot["status"] = ShotStatus.VIDEO_GENERATED.value
+            last_frame_path = _shot_dir(job["project_id"], job["shot_id"]) / "last_frame.png"
+            if _extract_last_frame(final_url, last_frame_path):
+                shot["last_frame_path"] = (
+                    f"/assets/{job['project_id']}/shots/{job['shot_id']}/last_frame.png"
+                )
+            shot["updated_at"] = datetime.utcnow().isoformat()
+            _save_shots(job["project_id"], shots)
+        return {
+            "status": "completed",
+            "video_url": final_url,
+            "take_id": job["take_id"],
+            "shot_id": job["shot_id"],
+            "progress": {"current": len(job["segments"]), "total": len(job["segments"])},
+        }
+
+    # Check one legacy pairwise segment
     seg_idx = job["current_segment"]
     segment_job_ids = job["segment_job_ids"]
     if seg_idx >= len(segment_job_ids):

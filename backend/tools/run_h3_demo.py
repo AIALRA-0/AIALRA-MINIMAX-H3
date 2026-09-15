@@ -1,4 +1,9 @@
-"""Generate a resumable three-shot MiniMax H3 continuity demo."""
+"""Generate a legacy decoded-clip transition experiment.
+
+This utility is retained for regression comparison only. It does not provide
+native H3 latent continuation and its output must not be described as seamless.
+Use run_h3_continuum_demo.py for production continuity evaluation.
+"""
 
 from __future__ import annotations
 

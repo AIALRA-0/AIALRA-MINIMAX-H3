@@ -130,7 +130,7 @@ class ComfyVideoDriver(VideoDriver):
     def _load_workflow(self, name: str) -> dict:
         workflow_path = Path(__file__).parent.parent / "workflows" / f"{name}.json"
         if workflow_path.exists():
-            with open(workflow_path, "r") as f:
+            with open(workflow_path, "r", encoding="utf-8") as f:
                 return json.load(f)
         return {}
 
@@ -225,7 +225,9 @@ class ComfyVideoDriver(VideoDriver):
         upload_map = upload_map or {}
         # MiniMax H3 uses different workflows + model weights for R2V vs T2V/I2V
         wf_name = self._model_id
-        if self._model_id == "minimax_h3" and request.mode == VideoGenerationMode.R2V:
+        if self._model_id == "minimax_h3" and request.extra_params.get("continuum"):
+            wf_name = "minimax_h3_continuum"
+        elif self._model_id == "minimax_h3" and request.mode == VideoGenerationMode.R2V:
             wf_name = "minimax_h3_r2v"
         # LTX Video 2.3 uses a separate FLF2V workflow when last_frame is provided
         if self._model_id == "ltx_video_2_3" and request.last_frame_path:
@@ -318,6 +320,78 @@ class ComfyVideoDriver(VideoDriver):
                     # Disconnect last_frame — set to null for T2V/I2V without end frame
                     inputs["last_frame"] = None
                     nodes_to_remove.add("116")  # Remove the last_frame LoadImage node
+
+            # --- MiniMax H3 Continuum: native latent AV continuation ---
+            if ct == "H3ContinuumSamplerV38":
+                inputs["sequence_prompt"] = effective_prompt
+                configured_chunks = request.extra_params.get("continuum_chunks")
+                chunks = int(configured_chunks or max(1, round(request.duration_seconds / 5.0)))
+                chunks = max(1, min(16, chunks))
+                chunk_seconds = request.extra_params.get(
+                    "continuum_chunk_seconds",
+                    request.duration_seconds / chunks,
+                )
+                inputs["chunks"] = chunks
+                inputs["chunk_seconds"] = max(4.0, min(30.0, float(chunk_seconds)))
+                inputs["prompt_mode"] = request.extra_params.get("continuum_prompt_mode", "Timeline")
+                inputs["continuity"] = request.extra_params.get(
+                    "continuum_context",
+                    "Balanced — 22 frames",
+                )
+                inputs["audio_continuity"] = bool(
+                    request.extra_params.get("continuum_audio", True)
+                )
+                inputs["base_seed"] = request.seed if request.seed is not None else int(time.time()) % (2**32)
+                inputs["run_storage"] = request.extra_params.get(
+                    "continuum_storage",
+                    "Save + Auto Resume",
+                )
+                run_name = request.extra_params.get("continuum_run_name")
+                if run_name:
+                    inputs["run_name"] = str(run_name)
+                    inputs["project_id"] = str(run_name)
+                inputs["generation_mode"] = request.extra_params.get(
+                    "continuum_generation_mode",
+                    "Full Run",
+                )
+
+                ar_val = request.aspect_ratio.value if request.aspect_ratio else "16:9"
+                balanced = bool(request.extra_params.get("continuum_balanced", False))
+                resolution_map = {
+                    "16:9": (1024, 576) if balanced else (736, 416),
+                    "9:16": (576, 1024) if balanced else (416, 736),
+                    "1:1": (768, 768) if balanced else (544, 544),
+                    "4:3": (896, 672) if balanced else (640, 480),
+                    "21:9": (1152, 480) if balanced else (832, 352),
+                }
+                width, height = resolution_map.get(ar_val, resolution_map["16:9"])
+                inputs["size_source"] = "Manual"
+                inputs["width"] = int(request.extra_params.get("continuum_width", width))
+                inputs["height"] = int(request.extra_params.get("continuum_height", height))
+                inputs["preset"] = (
+                    "Balanced — 0.60 MP" if balanced else "Draft — 0.30 MP"
+                )
+
+                if not request.first_frame_path:
+                    inputs.pop("first_frame", None)
+                    nodes_to_remove.add("20")
+                if not request.last_frame_path:
+                    inputs.pop("last_frame", None)
+                    nodes_to_remove.add("21")
+                for ref_index in range(3):
+                    if ref_index >= len(request.reference_image_paths):
+                        inputs.pop(f"reference_image_{ref_index + 1}", None)
+                        nodes_to_remove.add(str(22 + ref_index))
+
+            if ct == "H3ContinuumAssembleSeamV35":
+                inputs["video_seam"] = request.extra_params.get(
+                    "continuum_video_seam",
+                    "Analyze Only",
+                )
+                inputs["audio_seam"] = request.extra_params.get(
+                    "continuum_audio_seam",
+                    "Auto",
+                )
 
             # --- MiniMax H3 R2V: MiniMaxH3ReferenceToVideo node ---
             if ct == "MiniMaxH3ReferenceToVideo":

@@ -23,7 +23,7 @@ The main path provides:
 - SeedVR2 3B INT8 for a 2× video master
 - Shot, take, audio, assembly, and timeline management
 - H3 Continuum V3.8 for reviewable chunks, partial reruns, and resumable long-form work
-- Three roughly five-second quality shots chained with tail-frame anchors and losslessly assembled for continuity demos
+- H3 Continuum V3.8 long takes with native latent video/audio context, exact-duration assembly, chunk review, and resumable generation
 
 The interface can switch between Chinese and English, with Chinese as the first-run default
 
@@ -63,7 +63,7 @@ See [local deployment](docs/LOCAL_DEPLOYMENT.md) for prerequisites, storage layo
 
 - First, create a character, location, or starting frame with FLUX.2 Klein
 - Second, select MiniMax H3 and use the 0.2 MP, 8-step, 15-second draft preset
-- For a quality-first short, use the 0.4 MP, 20-step base profile in roughly five-second shots and carry each tail frame into the next shot
+- For a quality-first long take, use the 20-step base model and H3 Continuum with 22 frames of native continuation context
 - Third, rank keyframes and review the eight temporally distributed candidates
 - Fourth, approve identity, composition, and motion, then run the SeedVR2 2× master pass
 - Fifth, place the normalized 15-second master on the timeline for assembly or export
@@ -91,9 +91,9 @@ Model weights are excluded from Git. [`config/model-manifest.json`](config/model
 
 Validated on 2026-09-15:
 
-- Backend suite: `19 passed`
+- Backend suite: `30 passed`
 - Production frontend build, ESLint, and TypeScript checks passed
-- Three ComfyUI API workflows passed validation against a live `object_info` response
+- Four ComfyUI API workflows passed validation against a live `object_info` response, including H3 Continuum V3.8 for long takes
 - H3 Continuum upstream suite: `1260 passed`, `2 skipped`; one test initially hit Windows GBK decoding and passed when rerun under UTF-8
 - The CPU media pipeline converted a 15.2-second fixture to exactly 15.0 seconds, 24 FPS, 360 frames, with AAC audio
 - Keyframe ranking produced and stored eight selected frames
@@ -101,9 +101,10 @@ Validated on 2026-09-15:
 - A real FLUX.2 Klein 512×512 starting frame completed in about 17 seconds
 - A real MiniMax H3 draft completed at 608×352, 24 FPS, and 360 frames in about 5 minutes 55 seconds
 - A full SeedVR2 2× master completed at 1216×704, 24 FPS, and 360 frames in about 2 hours 32 minutes
-- The new quality demo uses three 0.4 MP, 20-step base-model shots and delivers 864×480, 372 frames, and 15.5007 seconds after about eight minutes of H3 compute
-- Tail frames anchor all three shots; video assembly is stream-copy, while native-audio boundaries receive loudness matching and 80 ms fades
-- The final master retained exactly 15.000 seconds of H.264 video and AAC stereo audio; sampled frames preserved the character, wardrobe, train, lighting, and camera progression
+- The previous three-independent-shot demo failed human continuity review and is retained only as regression evidence
+- The current H3 Continuum candidate uses 3×5-second latent AV chunks at 1024×576 and 20 steps, producing 360 frames and 14.998 seconds in about 690.5 seconds
+- The 5-second and 10-second boundaries pass frame-by-frame continuity review, but the candidate is not presented as an industry-best high-resolution final
+- The current candidate retains 14.999 seconds of H.264 video and AAC stereo audio; sampled frames preserve the character, wardrobe, compass, glasshouse, lighting, and camera progression
 - Gitleaks reported `no leaks found` for both the publication worktree and its complete commit history
 - The [public GitHub repository](https://github.com/AIALRA-0/AIALRA-MINIMAX-H3) is live; the frontend image, backend image, and Compose proxy smoke test all passed
 - The VPS loopback reverse tunnel is live and returns HTTP 200 while the local studio runs in locked mode

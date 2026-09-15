@@ -51,7 +51,10 @@ def validate_workflow(path: Path, object_info: dict[str, Any]) -> list[str]:
         required = declared.get("required", {})
         optional = declared.get("optional", {})
         for name in required:
-            if name not in inputs:
+            # ComfyUI's autogrow inputs are serialized as values.a, values.b,
+            # and so on, while object_info declares their root as values.
+            has_dynamic_child = any(key.startswith(f"{name}.") for key in inputs)
+            if name not in inputs and not has_dynamic_child:
                 errors.append(f"node {node_id} ({class_type}): missing required input {name!r}")
 
         for name, value in inputs.items():
